@@ -1,0 +1,17 @@
+[project]
+name = "educationclaw-agent"
+version = "0.1.0"
+description = "A radically transparent teaching agent for workshops"
+requires-python = ">=3.11"
+dependencies = [
+    "flask",
+    "requests",
+    "python-dotenv",
+]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["agent_data"]   # the agent's own workspace files are not project code
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

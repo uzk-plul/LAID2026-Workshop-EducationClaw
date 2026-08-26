@@ -1,0 +1,32 @@
+# Secrets — the API key lives here, never commit it
+.env
+
+# Python / uv / ruff
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# Agent runtime state — produced by runs, cleared by the reset buttons.
+# The three brain files (agent_data/*.md) stay tracked on purpose:
+# they are the workshop's curriculum.
+agent_data/logs/
+agent_data/llm_calls/
+agent_data/memory/
+agent_data/workspace/
+agent_data/status.json
+agent_data/tasks.json
+agent_data/settings.json
+agent_data/*.flag
+# the external screen file (written by the set_screen tool)
+agent_data/message.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+agent_data/*.tmp
+
+# Local Claude Code settings
+.claude/settings.local.json
