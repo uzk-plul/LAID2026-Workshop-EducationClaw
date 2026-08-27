@@ -401,6 +401,51 @@ def test_verification_task():
     assert "task_queued" in [e["type"] for e in storage.read_events()]
 
 
+def test_narrative():
+    """The story of a task is retold from the log: the model's thought,
+    each tool call with its result, refused calls, subtasks nested under
+    their parent — and logs/narratives.md is rewritten when a task ends."""
+    import narrative
+
+    replies = [
+        'First the time.\n```json\n{"tool": "get_time", "args": {}}\n```',
+        'Try a mood.\n```json\n{"tool": "set_screen", '
+        '"args": {"message": "Hi", "mood": "angry"}}\n```',
+        'Delegate the rest.\n```json\n{"tool": "add_task", '
+        '"args": {"description": "Save a memory titled Greeted."}}\n```',
+        'All queued.\n```json\n{"tool": "finish", "args": {"summary": "greeted"}}\n```',
+        # the subtask
+        'Saving.\n```json\n{"tool": "save_memory", '
+        '"args": {"title": "Greeted", "content": "yes"}}\n```',
+        'Done.\n```json\n{"tool": "finish", "args": {"summary": "memory saved"}}\n```',
+    ]
+    original = tools.MEMORY_DIR
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tools.MEMORY_DIR = Path(tmp)
+            queued = run_scripted("Greet the workshop.", replies)
+    finally:
+        tools.MEMORY_DIR = original
+
+    story = narrative.narrate_task(queued["id"])
+    assert story.startswith("## Task 1 — Greet the workshop.")
+    assert "done (4 rounds" in story and '"greeted"' in story
+    assert 'Round 1: thought "First the time." → called **get_time**() → It is' in story
+    assert 'Round 2: thought "Try a mood." → called **set_screen**(' in story
+    assert 'message="Hi", mood="angry")' in story
+    assert "**refused:** mood 'angry' is not allowed" in story
+    assert 'queued subtask 1.1: "Save a memory titled Greeted."' in story
+    assert 'Round 4: thought "All queued." → called **finish** → "greeted"' in story
+    # The subtask is told underneath, indented one level.
+    assert "  ### Subtask 1.1 — Save a memory titled Greeted." in story
+    assert '  - Round 1: thought "Saving." → called **save_memory**(' in story
+    # The file on disk tells the same story for every top-level task.
+    on_disk = storage.NARRATIVES_FILE.read_text(encoding="utf-8")
+    assert on_disk.startswith("# Narratives") and story.strip() in on_disk
+    # A task that never ran still gets a (short) story.
+    assert narrative.narrate_task(9999) == ""
+
+
 def test_worker_thread_handoff():
     """The background worker (what app.py starts) drains the queue and
     retires; a later submission starts a fresh one. No task is stranded."""

@@ -26,6 +26,7 @@ import time
 from datetime import datetime
 
 from llm import LLMError, call_llm
+from narrative import write_narratives
 from storage import (
     CONTINUE_FILE,
     GHOST_FILE,
@@ -152,6 +153,16 @@ def _is_call(obj) -> bool:
     return isinstance(obj, dict) and "tool" in obj
 
 
+def thought_of(reply: str) -> str:
+    """The model's 'thinking out loud' — the prose BEFORE its tool call.
+    Logged with every tool call so the story of the run (narrative.py)
+    can quote why the model did what it did."""
+    text = re.split(r"```|\[TOOL_CALLS\]", reply, maxsplit=1)[0]
+    if "```" not in reply and "{" in text:
+        text = text[: text.find("{")]  # a bare JSON call without a fence
+    return " ".join(text.split())[:300]
+
+
 _DECODER = json.JSONDecoder(strict=False)  # strict=False: allow raw newlines in strings
 
 
@@ -224,6 +235,9 @@ def finish_task(task, status: str, **fields):
         result=s.get("result"),
         error=s.get("error"),
     )
+    # A task ended — retell the story of every top-level task in
+    # logs/narratives.md (this task's own family included).
+    write_narratives()
 
 
 def run_queue():
@@ -239,6 +253,7 @@ def run_queue():
             # Stop means stop EVERYTHING: cancel whatever is still queued.
             while (leftover := claim_next_task()) is not None:
                 update_task(leftover["id"], status="stopped", error="Cancelled by Stop.")
+            write_narratives()  # the cancelled tasks are part of the story too
             consume_flag(STOP_FILE)  # the flag did its job — clear it
             return
 
@@ -406,8 +421,8 @@ def run_one(task) -> str:
                     )
                     continue
                 summary = args.get("summary", "(no summary given)")
+                log_event("task_done", summary=summary, thought=thought_of(reply))
                 finish_task(task, "done", result=summary)
-                log_event("task_done", summary=summary)
 
                 # Self-verification: a finished USER task queues a
                 # verification task — a separate, fresh agent run that
@@ -433,7 +448,7 @@ def run_one(task) -> str:
             # 4. run the tool, append the result.
             # In planning mode the orchestrator ENFORCES the plan-only rule:
             # the model cannot sneak in real work, it can only delegate.
-            log_event("tool_call", tool=name, args=args)
+            log_event("tool_call", tool=name, args=args, thought=thought_of(reply))
             if planning and name != "add_task":
                 result = (
                     "TOOL ERROR: planning mode — only add_task and "

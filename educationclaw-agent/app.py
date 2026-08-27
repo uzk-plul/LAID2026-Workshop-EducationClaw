@@ -22,6 +22,7 @@ from flask import Flask, jsonify, request, send_from_directory
 import llm
 import storage
 from agent import ensure_worker, worker_busy
+from narrative import narrate_task
 from tools import TOOLS
 
 app = Flask(__name__, static_folder="static")
@@ -132,6 +133,19 @@ def api_llm_call(call_id):
             "response": response_json,
         }
     )
+
+
+@app.route("/api/narrative/<int:task_id>")
+def api_narrative(task_id):
+    """The story of one task — fetched when you click a task row.
+
+    Assembled live from events.jsonl and tasks.json (see narrative.py),
+    so it also works for a task that is still running. The same text
+    for every top-level task lives in logs/narratives.md."""
+    story = narrate_task(task_id)
+    if not story:
+        return jsonify({"error": "no such task"}), 404
+    return jsonify({"task_id": task_id, "markdown": story})
 
 
 @app.route("/api/workspace/<path:relpath>")

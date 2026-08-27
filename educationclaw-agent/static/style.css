@@ -502,6 +502,25 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 .msg-card.role-error     { border-left-color: var(--peach); }
 .msg-card.role-error     .msg-role { color: var(--peach); }
 
+/* ---------- the story of a task (in the task modal) ---------- */
+.story {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 18px; font-size: 13px; line-height: 1.6;
+}
+.story .story-h2 {
+  color: var(--cyan); font-weight: 600; font-size: 14px; margin: 4px 0 6px;
+}
+.story .story-h3 {
+  color: var(--lavender); font-weight: 600; font-size: 13px; margin: 14px 0 4px;
+  padding-top: 10px; border-top: 1px dashed var(--line);
+}
+.story p { color: var(--muted); margin: 0 0 8px; }
+.story p b { color: var(--text); }
+.story ul { margin: 0 0 8px 18px; padding: 0; }
+.story ul ul { margin: 2px 0 2px 16px; }
+.story li { margin-bottom: 4px; word-break: break-word; }
+.story li b { color: var(--peach); font-family: var(--mono); font-size: 12px; }
+
 /* ---------- "how it works" modal ---------- */
 .help-content { overflow-y: auto; font-size: 14px; line-height: 1.7; }
 .help-content p { margin-bottom: 12px; }

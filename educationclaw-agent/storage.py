@@ -39,6 +39,7 @@ KNOWLEDGE_FILE = AGENT_DATA / "KNOWLEDGE.md"  # impromptu knowledge base
 MEMORY_DIR = AGENT_DATA / "memory"  # one file per memory
 LOGS_DIR = AGENT_DATA / "logs"
 EVENTS_FILE = LOGS_DIR / "events.jsonl"  # append-only event log
+NARRATIVES_FILE = LOGS_DIR / "narratives.md"  # the story of every task (see narrative.py)
 LLM_CALLS_DIR = AGENT_DATA / "llm_calls"  # one file per LLM call
 STATUS_FILE = AGENT_DATA / "status.json"  # current task status
 TASKS_FILE = AGENT_DATA / "tasks.json"  # the task list (queue + record)
@@ -499,7 +500,7 @@ def read_memories() -> dict:
 def reset_run_data():
     for f in LLM_CALLS_DIR.glob("*"):
         f.unlink()
-    for f in (EVENTS_FILE, TASKS_FILE, STOP_FILE, CONTINUE_FILE):
+    for f in (EVENTS_FILE, NARRATIVES_FILE, TASKS_FILE, STOP_FILE, CONTINUE_FILE):
         if f.exists():
             f.unlink()
     write_status(

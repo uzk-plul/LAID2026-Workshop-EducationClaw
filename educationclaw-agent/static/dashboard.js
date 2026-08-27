@@ -558,8 +558,9 @@ function renderTasks(tasks) {
     </div>`).join(""));
 }
 
-// Click a task row: show its full description and outcome in the modal.
-function openTask(id) {
+// Click a task row: show its full description, outcome and STORY — the
+// run retold round by round, subtasks and verifications included.
+async function openTask(id) {
   const t = (lastState?.tasks || []).find(x => x.id === id);
   if (!t) return;
   $("call-modal-title").textContent =
@@ -580,7 +581,60 @@ function openTask(id) {
   mk("TASK DESCRIPTION — what this run was told to do", t.task);
   mk("OUTCOME", t.result || t.error ||
      (t.status === "queued" ? "Still waiting in the queue." : "Still running."));
+
+  // The story is assembled server-side from the event log — the same
+  // text is in agent_data/logs/narratives.md for every top-level task.
+  const h = document.createElement("div");
+  h.className = "call-section";
+  h.textContent = "THE STORY — what happened, round by round";
+  const hint = document.createElement("div");
+  hint.className = "call-hint";
+  hint.innerHTML = `Retold from <b>events.jsonl</b>: what the model thought,
+    which tool it called, what came back — and the same for every subtask
+    and verification this task spawned. No model wrote this; it is the log.`;
+  const story = document.createElement("div");
+  story.className = "story";
+  story.innerHTML = `<div class="empty">Loading…</div>`;
+  box.append(h, hint, story);
   $("call-modal").classList.remove("hidden");
+
+  try {
+    const data = await (await fetch(`/api/narrative/${Number(id)}`)).json();
+    story.innerHTML = renderStory(data.markdown || "");
+  } catch (err) {
+    story.innerHTML = `<div class="empty">Could not load the story.</div>`;
+  }
+}
+
+// A tiny markdown renderer — just enough for narrative.py's output:
+// "## " / "### " headings, "**bold**", and "- " bullets nested by
+// indentation. Everything is escaped first, so log content can't inject.
+function renderStory(md) {
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  let html = "", depth = 0;
+  const closeTo = (d) => { while (depth > d) { html += "</ul>"; depth--; } };
+  for (const raw of md.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+    const lead = line.match(/^ */)[0].length;
+    const body = line.trim();
+    let m;
+    if ((m = body.match(/^(#{2,3}) (.*)$/))) {
+      closeTo(0);
+      html += `<div class="story-h${m[1].length}">${inline(m[2])}</div>`;
+    } else if ((m = body.match(/^- (.*)$/))) {
+      // A bullet at indentation N (in steps of 2 spaces) is nested N deep.
+      const d = Math.floor(lead / 2) + 1;
+      while (depth < d) { html += "<ul>"; depth++; }
+      closeTo(d);
+      html += `<li>${inline(m[1])}</li>`;
+    } else {
+      closeTo(0);
+      html += `<p>${inline(body)}</p>`;
+    }
+  }
+  closeTo(0);
+  return html || `<div class="empty">Nothing to tell yet.</div>`;
 }
 
 // ---------------------------------------------------------------------------
