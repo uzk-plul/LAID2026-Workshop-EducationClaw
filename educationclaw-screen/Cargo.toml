@@ -1,0 +1,17 @@
+[package]
+name = "robotface"
+version = "0.1.0"
+edition = "2021"
+description = "A wide-screen (5:1) TUI robot face that speaks messages from a JSON file"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
