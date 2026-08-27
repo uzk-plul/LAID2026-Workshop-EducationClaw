@@ -30,6 +30,15 @@ uv run app.py
 ```
 
 Open http://127.0.0.1:5000 (set `PORT` in `.env` to change it).
+
+To compare models, add more of them to `.env` with an `LLM_<n>_` prefix
+(`LLM_2_BASE_URL`, `LLM_2_API_KEY`, `LLM_2_MODEL`, optional `LLM_2_LABEL`).
+Keys a numbered model leaves out fall back to the plain ones, so a second
+model at the same provider needs only its `MODEL` line — see
+`.env.example`. The dashboard header then shows a model picker; the
+choice is stored as `model` in `settings.json` and applies to the next
+LLM call, even mid-task.
+
 Run the tests with `uv run python test_agent.py`; lint and format with
 `uv run --with ruff ruff check .` and `uv run --with ruff ruff format .`.
 
@@ -38,7 +47,7 @@ Run the tests with `uv run python test_agent.py`; lint and format with
 | File            | What it is                                                 |
 | --------------- | ---------------------------------------------------------- |
 | `agent.py`      | The agentic loop — start reading here                      |
-| `llm.py`        | One HTTP POST per LLM call, fully logged                   |
+| `llm.py`        | One HTTP POST per LLM call, fully logged; models from .env |
 | `tools.py`      | The tool registry — add your own tool here                 |
 | `narrative.py`  | Retells a task's run as a plain-English story from the log |
 | `storage.py`    | Paths and file plumbing (logs, status, tasks, flags)       |
@@ -59,7 +68,7 @@ Run the tests with `uv run python test_agent.py`; lint and format with
 | `llm_calls/NNN.txt`  | The full request + response of every single LLM call                |
 | `tasks.json`         | The task queue and record (subtasks, verifications)                 |
 | `status.json`        | What the agent is doing right now                                   |
-| `settings.json`      | Loop settings (max rounds, plan first, self-verification)           |
+| `settings.json`      | Loop settings (max rounds, plan first, self-verification, model)    |
 | `workspace/`         | The only folder the `file_edit` tool may touch                      |
 | `message.json`       | The "screen": `{"message": "...", "mood": "neutral|happy|sad"}` |
 
@@ -84,6 +93,9 @@ The system prompt, the executor and the dashboard all read that registry.
 - **Self-verification** — every finished user task queues a fresh
   verification run that checks the work with its own tools.
 - **max rounds** — the loop cap, re-read every round.
+- **Model picker** (in the header, once `.env` has several models) —
+  which model the next LLM call goes to. Switching mid-task is allowed;
+  the story of the task names every model that answered.
 - **Stop** — cancels the running task and everything still queued.
 - **Reset logs / Reset everything** — clear the run data / full factory
   reset (only `.env` survives).

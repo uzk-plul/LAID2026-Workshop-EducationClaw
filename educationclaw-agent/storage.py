@@ -63,6 +63,10 @@ DEFAULT_SETTINGS = {
     # If true, every user task first runs as a PLANNER that may only
     # create subtasks — the real work then happens in those subtasks.
     "plan": False,
+    # Which of the models configured in .env to talk to — the id shown in
+    # the dashboard's model picker ("1" = the plain BASE_URL/MODEL entry).
+    # Read before every LLM call, so a switch applies even mid-task.
+    "model": "1",
 }
 
 # The screen program reads this exact file from the agent_data folder.
@@ -240,6 +244,7 @@ def write_settings(changes: dict):
     settings["max_iterations"] = max(1, min(50, int(settings["max_iterations"])))
     settings["verify"] = bool(settings["verify"])
     settings["plan"] = bool(settings.get("plan", False))
+    settings["model"] = str(settings.get("model") or DEFAULT_SETTINGS["model"])
     atomic_write_text(SETTINGS_FILE, json.dumps(settings, indent=2))
     return settings
 
@@ -290,7 +295,8 @@ def describe_event(event_type: str, details: dict) -> str:
             "then ask the model what to do next."
         )
     if event_type == "llm_call_start":
-        return f"Sending the whole conversation to the model (call #{d.get('call_id')})."
+        to = d.get("model") or "the model"
+        return f"Sending the whole conversation to {to} (call #{d.get('call_id')})."
     if event_type == "llm_call_done":
         text = f"The model answered after {d.get('duration')}s"
         if d.get("tokens_in") is not None:

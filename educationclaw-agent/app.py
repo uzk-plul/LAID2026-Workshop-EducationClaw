@@ -66,15 +66,30 @@ def api_state():
     all_events = storage.read_events()
     events_offset = max(0, len(all_events) - 400)
 
+    # The model the next call will use, plus the whole list for the
+    # header's picker (never the API keys — only a masked hint).
+    current = llm.current_model() or {}
+    api_key = current.get("api_key", "")
+
     return jsonify(
         {
             "status": storage.read_status(),
             "config": {
-                "model": llm.MODEL,
-                "endpoint": llm.BASE_URL,
-                "api_key_masked": (llm.API_KEY[:3] + "..." + llm.API_KEY[-4:])
-                if len(llm.API_KEY) > 8
+                "model": current.get("model", ""),
+                "endpoint": current.get("base_url", ""),
+                "api_key_masked": (api_key[:3] + "..." + api_key[-4:])
+                if len(api_key) > 8
                 else "(not set)",
+                "selected": current.get("id"),
+                "models": [
+                    {
+                        "id": m["id"],
+                        "label": m["label"],
+                        "model": m["model"],
+                        "endpoint": m["base_url"],
+                    }
+                    for m in llm.MODELS
+                ],
             },
             "tools": [
                 {"name": name, "description": t["description"], "args": t["args"]}
@@ -112,6 +127,7 @@ def api_llm_call(call_id):
     # The file format is:  header / --- REQUEST: ... --- / json /
     #                      --- RESPONSE (...) --- / json (or error text)
     request_json, response_json, status = None, None, ""
+    url_match = re.search(r"--- REQUEST: POST (\S+) ---", raw)
     try:
         req_part = raw.split("---", 2)[2]  # after "--- REQUEST: url ---"
         req_text, resp_marker = req_part.split("--- RESPONSE (", 1)
@@ -128,6 +144,7 @@ def api_llm_call(call_id):
         {
             "id": call_id,
             "raw": raw,
+            "url": url_match.group(1) if url_match else None,
             "status": status,
             "request": request_json,
             "response": response_json,
@@ -210,11 +227,14 @@ def api_step_mode():
 
 @app.route("/api/settings", methods=["POST"])
 def api_settings():
-    """Change loop settings (max_iterations, verify). Stored in
-    settings.json; the agent re-reads it every round, so raising the
-    round limit works even while a task is running."""
+    """Change loop settings (max_iterations, verify, plan, model). Stored
+    in settings.json; the agent re-reads it every round, so raising the
+    round limit — or switching the model — works even while a task runs."""
     data = request.get_json(silent=True) or {}
-    changes = {k: v for k, v in data.items() if k in ("max_iterations", "verify", "plan")}
+    changes = {k: v for k, v in data.items() if k in ("max_iterations", "verify", "plan", "model")}
+    # The model must be one of the entries configured in .env.
+    if "model" in changes and llm.model_by_id(changes["model"]) is None:
+        return jsonify({"error": "unknown model — see the LLM_<n>_ keys in .env"}), 400
     try:
         return jsonify({"ok": True, "settings": storage.write_settings(changes)})
     except (TypeError, ValueError):
@@ -281,8 +301,13 @@ if __name__ == "__main__":
     storage.init_agent_data()
     print()
     print("  educationclaw-agent")
-    print(f"  Model:    {llm.MODEL or '(set MODEL in .env!)'}")
-    print(f"  Endpoint: {llm.BASE_URL or '(set BASE_URL in .env!)'}")
+    if not llm.MODELS:
+        print("  Models:    (none — set BASE_URL, API_KEY and MODEL in .env!)")
+    for m in llm.MODELS:
+        print(
+            f"  Model {m['id']}:   {m['model']} @ {m['base_url'] or '(no BASE_URL!)'}"
+            f"{'  <- selected' if m is llm.current_model() else ''}"
+        )
     print(f"  Dashboard: http://127.0.0.1:{PORT}")
     print()
     # use_reloader=False: the reloader would start everything twice.

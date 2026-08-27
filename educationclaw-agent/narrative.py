@@ -229,6 +229,10 @@ def _outcome(task: dict, run: list) -> str:
         stats.append(f"{len(calls)} LLM call{'s' if len(calls) != 1 else ''}")
     if tokens_in or tokens_out:
         stats.append(f"{tokens_in:,} tokens read / {tokens_out:,} written")
+    # Which model(s) answered — "a → b" if the pick was switched mid-run.
+    models = list(dict.fromkeys(e["model"] for e in calls if e.get("model")))
+    if models:
+        stats.append(f"model {' → '.join(models)}")
     stat_text = f" ({', '.join(stats)})" if stats else ""
 
     if status == "done":

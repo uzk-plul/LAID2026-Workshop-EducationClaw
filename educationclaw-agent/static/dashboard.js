@@ -80,7 +80,7 @@ pollBrain();
 // ---------------------------------------------------------------------------
 
 function renderHeader(state) {
-  $("model").textContent = state.config.model || "(not set)";
+  renderModelPicker(state.config);
   $("endpoint").textContent = state.config.endpoint || "(not set)";
   $("apikey").textContent = state.config.api_key_masked;
 
@@ -135,6 +135,36 @@ function renderHeader(state) {
 
 function fmtTokens(n) {
   return n >= 10000 ? (n / 1000).toFixed(1) + "k" : String(n);
+}
+
+// The model picker: with one model in .env it is a plain label, with
+// several it becomes a dropdown. The choice is saved to settings.json
+// (via /api/settings) and the very next LLM call reads it — even mid-task.
+function renderModelPicker(config) {
+  const models = config.models || [];
+  const sel = $("model-select");
+  const single = models.length < 2;
+  $("model").hidden = !single;
+  sel.hidden = single;
+  if (single) {
+    $("model").textContent = config.model || "(not set)";
+    return;
+  }
+  const key = JSON.stringify(models);
+  if (lastHTML["model-select"] !== key) {   // rebuild only when the list changes
+    lastHTML["model-select"] = key;
+    sel.innerHTML = "";
+    for (const m of models) {
+      const opt = document.createElement("option");
+      opt.value = m.id;
+      opt.textContent = m.label;
+      opt.title = `${m.model} — ${m.endpoint}`;
+      sel.appendChild(opt);
+    }
+  }
+  if (document.activeElement !== sel && sel.value !== String(config.selected)) {
+    sel.value = config.selected;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +298,8 @@ function renderTimeline(events) {
     } else if (e.type === "llm_call_done") {
       const tokens = e.tokens_in != null
         ? `${e.tokens_in} tokens in, ${e.tokens_out} out — ` : "";
-      chip("llm", `LLM #${e.call_id}`, tokens + "click to open", e.call_id);
+      const model = e.model ? `${e.model} — ` : "";
+      chip("llm", `LLM #${e.call_id}`, model + tokens + "click to open", e.call_id);
     } else if (e.type === "llm_call_error") {
       chip("err", "LLM ✗", e.error || "");
     } else if (e.type === "tool_result") {
@@ -667,16 +698,20 @@ $("step-mode-check").onchange = (e) =>
     body: JSON.stringify({ on: e.target.checked }),
   }).then(poll);
 
-function saveSettings(changes) {
-  return fetch("/api/settings", {
+async function saveSettings(changes) {
+  const res = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
-  }).then(poll);
+  });
+  if (!res.ok) alert((await res.json()).error);
+  poll();
 }
 $("verify-check").onchange = (e) => saveSettings({ verify: e.target.checked });
 $("plan-check").onchange = (e) => saveSettings({ plan: e.target.checked });
 $("max-iter-input").onchange = (e) => saveSettings({ max_iterations: Number(e.target.value) });
+// The model is a setting like any other — the pick lands in settings.json.
+$("model-select").onchange = (e) => saveSettings({ model: e.target.value });
 
 $("reset-btn").onclick = async () => {
   const res = await fetch("/api/reset", { method: "POST" });
@@ -739,7 +774,9 @@ function renderCallModal() {
   const usage = (currentCall.response && currentCall.response.usage) || null;
   const usageText = usage
     ? `&nbsp;·&nbsp; ${usage.prompt_tokens} tokens read, ${usage.completion_tokens} written` : "";
-  let html = `<div class="call-meta">model: <b>${esc(req.model)}</b>
+  const endpoint = currentCall.url
+    ? ` &nbsp;·&nbsp; sent to: <b>${esc(currentCall.url)}</b>` : "";
+  let html = `<div class="call-meta">model: <b>${esc(req.model)}</b>${endpoint}
               &nbsp;·&nbsp; ${req.messages.length} messages sent
               &nbsp;·&nbsp; response: ${esc(currentCall.status || "?")}${usageText}</div>`;
 

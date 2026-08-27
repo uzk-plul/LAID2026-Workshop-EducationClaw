@@ -21,6 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import agent
+import llm
 import storage
 import tools
 
@@ -158,6 +159,105 @@ def test_settings():
         assert storage.write_settings({"max_iterations": 999})["max_iterations"] == 50
     finally:
         storage.write_settings(saved)
+
+
+# ---------------------------------------------------------------------------
+# Models — several provider/model combinations in .env, one picked at a time
+# ---------------------------------------------------------------------------
+
+
+def test_load_models():
+    """The plain keys are model 1 (an old .env keeps working); LLM_<n>_
+    keys add more and inherit whatever they leave out from the plain keys."""
+    env = {
+        "BASE_URL": "https://api.openai.com/v1/",
+        "API_KEY": "sk-1",
+        "MODEL": "gpt-4o-mini",
+        "LLM_2_MODEL": "gpt-4o",  # same provider: only the model line
+        "LLM_2_LABEL": "the big one",
+        "LLM_3_BASE_URL": "http://localhost:11434/v1",
+        "LLM_3_API_KEY": "ollama",
+        "LLM_3_MODEL": "llama3.2",
+        "LLM_3_TEMPERATURE": "0.2",
+    }
+    m1, m2, m3 = llm.load_models(env)
+    assert (m1["id"], m1["model"], m1["label"]) == ("1", "gpt-4o-mini", "gpt-4o-mini")
+    assert m1["base_url"] == "https://api.openai.com/v1"  # trailing slash dropped
+    assert (m2["base_url"], m2["api_key"]) == (m1["base_url"], "sk-1")  # inherited
+    assert (m2["model"], m2["label"]) == ("gpt-4o", "the big one")
+    assert (m3["base_url"], m3["api_key"]) == ("http://localhost:11434/v1", "ollama")
+    assert m3["temperature"] == 0.2 and m3["max_tokens"] is None
+    assert m1["temperature"] is None
+
+    # The classic single-model .env — and no configuration at all.
+    only = llm.load_models({"BASE_URL": "http://x/v1", "API_KEY": "k", "MODEL": "m"})
+    assert [(m["id"], m["model"]) for m in only] == [("1", "m")]
+    assert llm.load_models({}) == []
+
+    # The same model name at two endpoints gets labels that tell them apart.
+    twins = llm.load_models(
+        {
+            "BASE_URL": "https://a.example/v1",
+            "API_KEY": "k",
+            "MODEL": "m",
+            "LLM_2_BASE_URL": "http://localhost:1234/v1",
+            "LLM_2_MODEL": "m",
+        }
+    )
+    assert [m["label"] for m in twins] == ["m @ a.example", "m @ localhost:1234"]
+
+
+def test_model_selection():
+    """The dashboard's pick is just "model" in settings.json: the next call
+    goes to that entry, an unknown pick falls back to the first model —
+    and the call file and the event log record which model answered."""
+    saved_models, saved_post = llm.MODELS, llm.requests.post
+    llm.MODELS = llm.load_models(
+        {
+            "BASE_URL": "https://api.openai.com/v1",
+            "API_KEY": "sk-1",
+            "MODEL": "gpt-4o-mini",
+            "LLM_2_BASE_URL": "http://localhost:11434/v1",
+            "LLM_2_API_KEY": "ollama",
+            "LLM_2_MODEL": "llama3.2",
+        }
+    )
+    sent = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent.append((url, headers["Authorization"], json["model"]))
+
+        class Response:
+            status_code = 200
+
+            def json(self):
+                return {"choices": [{"message": {"content": "hi"}}], "usage": {}}
+
+        return Response()
+
+    llm.requests.post = fake_post
+    try:
+        with clean_run():
+            storage.write_settings({"model": "2"})
+            assert llm.current_model()["id"] == "2"
+            assert llm.call_llm([{"role": "user", "content": "hello"}]) == "hi"
+            storage.write_settings({"model": "no-such-model"})
+            assert llm.current_model()["id"] == "1"
+            llm.call_llm([{"role": "user", "content": "hello"}])
+            on_disk = (storage.LLM_CALLS_DIR / "001.txt").read_text(encoding="utf-8")
+            events = storage.read_events()
+    finally:
+        llm.MODELS, llm.requests.post = saved_models, saved_post
+
+    assert sent == [
+        ("http://localhost:11434/v1/chat/completions", "Bearer ollama", "llama3.2"),
+        ("https://api.openai.com/v1/chat/completions", "Bearer sk-1", "gpt-4o-mini"),
+    ]
+    assert "POST http://localhost:11434/v1/chat/completions" in on_disk
+    done = [e for e in events if e["type"] == "llm_call_done"]
+    assert [e["model"] for e in done] == ["llama3.2", "gpt-4o-mini"]
+    # Even the plain-English line in the log names the model.
+    assert any("conversation to llama3.2" in e["note"] for e in events)
 
 
 # ---------------------------------------------------------------------------

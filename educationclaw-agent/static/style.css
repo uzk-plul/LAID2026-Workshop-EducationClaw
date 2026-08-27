@@ -55,6 +55,14 @@ h1 {
   border-radius: 20px; padding: 5px 15px; font-size: 12px; color: var(--muted);
 }
 .chip b { color: var(--text); font-weight: 600; }
+/* The model picker sits inside the "model:" chip (only with several models in .env). */
+.chip select {
+  background: var(--bg); color: var(--text); color-scheme: dark;
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 2px 8px; font-size: 12px; font-family: inherit;
+  max-width: 280px; cursor: pointer;
+}
+.chip select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 8px rgba(47, 107, 255, 0.35); }
 
 .badge {
   font-family: var(--pixel); font-size: 9px;

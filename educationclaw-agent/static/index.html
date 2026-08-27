@@ -21,9 +21,11 @@
       <span class="screen-msg" id="screen-msg">(no message yet)</span>
     </div>
     <div class="header-info">
-      <span class="chip" title="The model name sent in every request">
-        model: <b id="model">…</b></span>
-      <span class="chip" title="The OpenAI-compatible endpoint from .env">
+      <span class="chip" id="model-chip"
+            title="The model name sent in every request. With several models in .env this is a picker — the choice is saved to settings.json and applies to the next LLM call, even mid-task">
+        model: <b id="model">…</b>
+        <select id="model-select" hidden></select></span>
+      <span class="chip" title="The OpenAI-compatible endpoint of the selected model (from .env)">
         endpoint: <b id="endpoint">…</b></span>
       <span class="chip">key: <b id="apikey">…</b></span>
       <span class="chip" title="Tokens the model read / wrote in this log (from the API's usage field)">
@@ -209,7 +211,10 @@
         edit KNOWLEDGE.md while a task runs · ask for an "angry" screen mood and
         watch the model recover from the tool error · give it a big multi-part
         task and watch it split off subtasks with <code>add_task</code> · turn on
-        <i>self-verification</i> and watch a fresh run double-check the work.</p>
+        <i>self-verification</i> and watch a fresh run double-check the work ·
+        add a second model to <code>.env</code> (<code>LLM_2_MODEL=…</code>),
+        pick it in the header and run the same task again — compare the two
+        stories.</p>
       </div>
     </div>
   </div>
