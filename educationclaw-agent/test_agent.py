@@ -15,13 +15,16 @@ want a clean dashboard.
 """
 
 import json
+import re
 import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from string import Formatter
 
 import agent
 import llm
+import narrative
 import storage
 import tools
 
@@ -164,6 +167,117 @@ def test_settings():
 # ---------------------------------------------------------------------------
 # Models — several provider/model combinations in .env, one picked at a time
 # ---------------------------------------------------------------------------
+
+
+def test_i18n_tables():
+    """The dashboard's own words live in static/i18n.js: every key exists in
+    both languages with the same placeholders, every key the page uses is
+    defined (and nothing is defined that nobody uses), and the English event
+    sentences are exactly what storage.describe_event() writes into
+    events.jsonl — the one place where the two sides must agree."""
+    static = storage.PROJECT_DIR / "static"
+    src = (static / "i18n.js").read_text(encoding="utf-8")
+    src = re.sub(r"^\s*//.*$", "", src, flags=re.M)  # full-line comments are allowed
+    try:
+        table, _ = json.JSONDecoder().raw_decode(src, src.index("{", src.index("const I18N")))
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"i18n.js must stay JSON-compatible (double quotes, no trailing commas): {exc}"
+        ) from exc
+
+    def placeholders(text):
+        if isinstance(text, dict):  # a plural entry: {"one": ..., "other": ...}
+            assert set(text) == {"one", "other"}
+            return placeholders(text["one"]) | placeholders(text["other"])
+        return set(re.findall(r"\{(\w+)\}", text))
+
+    for key, entry in table.items():
+        assert set(entry) == {"en", "de"}, key
+        assert placeholders(entry["en"]) == placeholders(entry["de"]), key
+
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "dashboard.js").read_text(encoding="utf-8")
+    used = set(re.findall(r'data-i18n(?:-title|-placeholder)?="([^"]+)"', html))
+    used |= set(re.findall(r'\bt(?:Html)?\("([a-z]+(?:\.[a-z0-9_]+)+)"', js))
+    # Keys built at runtime ("status." + key, "event." + e.type, ...): every
+    # quoted dotted string in dashboard.js that starts with one of the
+    # table's areas (so CSS selectors like "section.panel" don't count),
+    # plus the enum values behind the runtime-built ones.
+    areas = {key.split(".")[0] for key in table}
+    used |= {k for k in re.findall(r'"([a-z]+(?:\.[a-z0-9_]+)+)"', js) if k.split(".")[0] in areas}
+    families = {
+        "status": [
+            "idle",
+            "running",
+            "paused",
+            "done",
+            "failed",
+            "stopped",
+            "verifying",
+            "planning",
+        ],
+        "mood": ["neutral", "happy", "sad"],
+        "kind": ["user", "subtask", "verification"],
+        "timeline.kind": ["task", "verify", "plan"],
+        "event": ["task_done", "task_failed", "task_stopped", "paused"],
+        "error": [
+            "no_such_call",
+            "no_such_task",
+            "no_such_file",
+            "empty_task",
+            "unknown_model",
+            "invalid_settings",
+            "unknown_file",
+            "busy",
+        ],
+        "outcome": ["max_rounds", "stopped", "cancelled_stop", "restart_running", "restart_queued"],
+    }
+    for prefix, values in families.items():
+        used |= {f"{prefix}.{v}" for v in values}
+    assert used <= set(table), f"missing in i18n.js: {sorted(used - set(table))}"
+    assert set(table) <= used, f"unused in i18n.js: {sorted(set(table) - used)}"
+
+    # The English event templates must say exactly what the server writes.
+    samples = [
+        ("task_start", {"kind": "verification"}, "event.task_start.verification"),
+        ("task_start", {"kind": "user", "planning": True}, "event.task_start.planning"),
+        ("task_start", {"kind": "user", "planning": False}, "event.task_start"),
+        ("planning_incomplete", {}, "event.planning_incomplete"),
+        ("task_queued", {"kind": "verification"}, "event.task_queued.verification"),
+        ("task_queued", {"kind": "subtask"}, "event.task_queued.subtask"),
+        ("task_queued", {"kind": "user"}, "event.task_queued"),
+        ("iteration_start", {"iteration": 3}, "event.iteration_start"),
+        ("llm_call_start", {"model": "gpt-x", "call_id": 3}, "event.llm_call_start"),
+        (
+            "llm_call_done",
+            {"duration": 1.2, "tokens_in": 10, "tokens_out": 3},
+            "event.llm_call_done.tokens",
+        ),
+        ("llm_call_done", {"duration": 1.2}, "event.llm_call_done"),
+        ("llm_call_error", {"attempt": 1}, "event.llm_call_error.first"),
+        ("llm_call_error", {"attempt": 2}, "event.llm_call_error.again"),
+        ("tool_call", {"tool": "get_time"}, "event.tool_call"),
+        (
+            "tool_result",
+            {"tool": "set_screen", "result": "TOOL ERROR: no"},
+            "event.tool_result.refused",
+        ),
+        ("tool_result", {"tool": "get_time", "result": "It is"}, "event.tool_result"),
+        ("protocol_error", {"count": 2}, "event.protocol_error.many"),
+        ("protocol_error", {"count": 0}, "event.protocol_error"),
+        ("task_done", {}, "event.task_done"),
+        ("task_failed", {}, "event.task_failed"),
+        ("task_stopped", {}, "event.task_stopped"),
+        ("paused", {}, "event.paused"),
+    ]
+
+    def render(template, fields):
+        return re.sub(r"\{(\w+)\}", lambda m: str(fields.get(m.group(1), m.group(0))), template)
+
+    for event_type, fields, key in samples:
+        assert render(table[key]["en"], fields) == storage.describe_event(event_type, fields), key
+    # describe_event says "the model" when no model name is known — so does the dashboard.
+    assert table["event.the_model"]["en"] == "the model"
 
 
 def test_load_models():
@@ -424,6 +538,9 @@ def test_stop_cancels_queue():
     assert tasks[t1["id"]]["status"] == "stopped", tasks
     assert tasks[t2["id"]]["status"] == "stopped", tasks
     assert len(calls) == 1  # round 1 of task 1 only — nothing after Stop
+    # The English sentence stays on disk; the code lets the dashboard translate it.
+    assert tasks[t1["id"]]["error_code"] == "stopped"
+    assert tasks[t2["id"]]["error_code"] == "cancelled_stop"
 
 
 def test_restart_recovery():
@@ -440,6 +557,25 @@ def test_restart_recovery():
     assert tasks[t1["id"]]["status"] == "failed"
     assert "restarted" in tasks[t1["id"]]["error"]
     assert tasks[t2["id"]]["status"] == "stopped"
+    assert tasks[t1["id"]]["error_code"] == "restart_running"
+    assert tasks[t2["id"]]["error_code"] == "restart_queued"
+
+
+def test_round_limit():
+    """The loop cap ends a task that never finishes — as 'failed', with an
+    error_code next to the English sentence so the dashboard can translate it."""
+    queued = run_scripted(
+        "Never finish.",
+        ['Again.\n```json\n{"tool": "get_time", "args": {}}\n```'] * 2,  # exactly 2 rounds
+        max_iterations=2,
+    )
+    task = task_by_id(queued["id"])
+    assert task["status"] == "failed" and task["error_code"] == "max_rounds", task
+    assert "Gave up after 2 rounds" in task["error"]
+    assert task["iterations"] == 2
+    # The story translates the code; the English telling keeps the stored sentence.
+    assert "Nach 2 Runden aufgegeben" in narrative.narrate_task(queued["id"], lang="de")
+    assert "Gave up after 2 rounds" in narrative.narrate_task(queued["id"])
 
 
 def test_plan_first_mode():
@@ -501,33 +637,40 @@ def test_verification_task():
     assert "task_queued" in [e["type"] for e in storage.read_events()]
 
 
-def test_narrative():
-    """The story of a task is retold from the log: the model's thought,
-    each tool call with its result, refused calls, subtasks nested under
-    their parent — and logs/narratives.md is rewritten when a task ends."""
-    import narrative
+# The scripted run test_narrative retells — shared with the German test so
+# both look at the very same story.
+GREETING_REPLIES = [
+    'First the time.\n```json\n{"tool": "get_time", "args": {}}\n```',
+    'Try a mood.\n```json\n{"tool": "set_screen", "args": {"message": "Hi", "mood": "angry"}}\n```',
+    'Delegate the rest.\n```json\n{"tool": "add_task", '
+    '"args": {"description": "Save a memory titled Greeted."}}\n```',
+    'All queued.\n```json\n{"tool": "finish", "args": {"summary": "greeted"}}\n```',
+    # the subtask
+    'Saving.\n```json\n{"tool": "save_memory", '
+    '"args": {"title": "Greeted", "content": "yes"}}\n```',
+    'Done.\n```json\n{"tool": "finish", "args": {"summary": "memory saved"}}\n```',
+]
 
-    replies = [
-        'First the time.\n```json\n{"tool": "get_time", "args": {}}\n```',
-        'Try a mood.\n```json\n{"tool": "set_screen", '
-        '"args": {"message": "Hi", "mood": "angry"}}\n```',
-        'Delegate the rest.\n```json\n{"tool": "add_task", '
-        '"args": {"description": "Save a memory titled Greeted."}}\n```',
-        'All queued.\n```json\n{"tool": "finish", "args": {"summary": "greeted"}}\n```',
-        # the subtask
-        'Saving.\n```json\n{"tool": "save_memory", '
-        '"args": {"title": "Greeted", "content": "yes"}}\n```',
-        'Done.\n```json\n{"tool": "finish", "args": {"summary": "memory saved"}}\n```',
-    ]
+
+def run_greeting_story():
+    """Run GREETING_REPLIES through the real loop (memories go to a temp
+    folder) and return (task_id, tasks, events) as they are on disk."""
     original = tools.MEMORY_DIR
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tools.MEMORY_DIR = Path(tmp)
-            queued = run_scripted("Greet the workshop.", replies)
+            queued = run_scripted("Greet the workshop.", list(GREETING_REPLIES))  # a copy: pop()
     finally:
         tools.MEMORY_DIR = original
+    return queued["id"], storage.read_tasks(), storage.read_events()
 
-    story = narrative.narrate_task(queued["id"])
+
+def test_narrative():
+    """The story of a task is retold from the log: the model's thought,
+    each tool call with its result, refused calls, subtasks nested under
+    their parent — and logs/narratives.md is rewritten when a task ends."""
+    task_id, tasks, events = run_greeting_story()
+    story = narrative.narrate_task(task_id, tasks, events)
     assert story.startswith("## Task 1 — Greet the workshop.")
     assert "done (4 rounds" in story and '"greeted"' in story
     assert 'Round 1: thought "First the time." → called **get_time**() → It is' in story
@@ -544,6 +687,94 @@ def test_narrative():
     assert on_disk.startswith("# Narratives") and story.strip() in on_disk
     # A task that never ran still gets a (short) story.
     assert narrative.narrate_task(9999) == ""
+
+
+def test_narrative_german():
+    """The same story in German: every sentence of the narrator is
+    translated, everything QUOTED from the run (task text, thoughts, tool
+    results) stays as it was — and the markdown skeleton is identical, so
+    the dashboard renders both the same way. The file on disk stays English."""
+    task_id, tasks, events = run_greeting_story()
+    en = narrative.narrate_task(task_id, tasks, events)
+    de = narrative.narrate_task(task_id, tasks, events, lang="de")
+    assert de.startswith("## Aufgabe 1 — Greet the workshop.")
+    assert "**Ergebnis:** erledigt (4 Runden" in de and '"greeted"' in de
+    assert 'Runde 1: dachte "First the time." → rief **get_time**() auf → It is' in de
+    assert "**verweigert:** mood 'angry' is not allowed" in de  # tool text stays English
+    assert 'Teilaufgabe 1.1 eingereiht: "Save a memory titled Greeted."' in de
+    assert 'Runde 4: dachte "All queued." → rief **finish** auf → "greeted"' in de
+    assert "  ### Teilaufgabe 1.1 — Save a memory titled Greeted." in de
+    assert '  - Runde 1: dachte "Saving." → rief **save_memory**(' in de
+
+    def skeleton(story):  # headings, bullets and indentation — nothing else
+        return [re.match(r" *(#+ |- |)", line).group(0) for line in story.splitlines()]
+
+    assert skeleton(de) == skeleton(en)
+    assert narrative.narrate_task(task_id, tasks, events, lang="xx") == en  # unknown = English
+    assert narrative.narrate_all(tasks, events, lang="de").startswith("# Geschichten — eine pro")
+    assert storage.NARRATIVES_FILE.read_text(encoding="utf-8").startswith("# Narratives")
+
+
+def test_narrative_numbers():
+    """Plurals and thousands separators differ per language. The scripted
+    model bypasses call_llm, so _outcome is checked directly with fake usage."""
+    task = {"status": "done", "iterations": 1, "result": "ok"}
+    run = [{"type": "llm_call_done", "tokens_in": 12345, "tokens_out": 6, "model": "m"}]
+    en = narrative._outcome(task, run)
+    de = narrative._outcome(task, run, lang="de")
+    assert "1 round, 1 LLM call, 12,345 tokens read / 6 written, model m" in en
+    assert "1 Runde, 1 LLM-Aufruf, 12.345 Tokens gelesen / 6 geschrieben, Modell m" in de
+    # A known error_code is translated; the English telling keeps the stored sentence.
+    task = {"status": "failed", "iterations": 3, "error": "Gave up.", "error_code": "max_rounds"}
+    assert narrative._outcome(task, []) == "failed (3 rounds) — Gave up."
+    assert "Nach 3 Runden aufgegeben" in narrative._outcome(task, [], lang="de")
+    # No code (an LLM error, a crash): the sentence is shown as stored in every language.
+    task = {"status": "failed", "error": "connection refused"}
+    assert "connection refused" in narrative._outcome(task, [], lang="de")
+
+
+def test_narrative_strings_parity():
+    """Every sentence exists in both languages with the same placeholders —
+    otherwise a missing translation would only show up at render time."""
+
+    def placeholders(template):
+        return {name for _, name, _, _ in Formatter().parse(template) if name}
+
+    assert set(narrative.LANGUAGES) == {"en", "de"}
+    for key, entry in narrative.STRINGS.items():
+        assert set(entry) == {"en", "de"}, key
+        assert placeholders(entry["en"]) == placeholders(entry["de"]), key
+    assert set(narrative.OUTCOMES) == {
+        "max_rounds",
+        "stopped",
+        "cancelled_stop",
+        "restart_running",
+        "restart_queued",
+    }
+
+
+def test_api_narrative_and_errors():
+    """The story endpoint speaks both languages (?lang=de), and every error
+    the dashboard can show carries a stable code next to its English text.
+    Only error paths are exercised: a valid POST would start the real worker."""
+    import app as web  # safe: the port probe and the startup are under __main__
+
+    client = web.app.test_client()
+    reply = 'Hi.\n```json\n{"tool": "finish", "args": {"summary": "hi"}}\n```'
+    queued = run_scripted("Say hi.", [reply])
+    en = client.get(f"/api/narrative/{queued['id']}").get_json()["markdown"]
+    de = client.get(f"/api/narrative/{queued['id']}?lang=de").get_json()["markdown"]
+    assert en.startswith("## Task 1") and de.startswith("## Aufgabe 1")
+    assert client.get(f"/api/narrative/{queued['id']}?lang=xx").get_json()["markdown"] == en
+    res = client.get("/api/narrative/9999")
+    assert res.status_code == 404 and res.get_json()["code"] == "no_such_task"
+    res = client.post("/api/task", json={"task": "  "})
+    assert res.status_code == 400 and res.get_json()["code"] == "empty_task"
+    assert res.get_json()["error"] == "Task text is empty."  # the sentence is still there
+    res = client.post("/api/settings", json={"model": "no-such-model"})
+    assert res.status_code == 400 and res.get_json()["code"] == "unknown_model"
+    res = client.get("/api/llm_calls/zzz")
+    assert res.status_code == 404 and res.get_json()["code"] == "no_such_call"
 
 
 def test_worker_thread_handoff():

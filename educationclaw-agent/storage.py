@@ -115,7 +115,9 @@ def init_agent_data():
     # agent thread exists anymore. Turn that into an honest failure.
     if read_status().get("status") in ("running", "paused"):
         update_status(
-            status="failed", error="The server was restarted while this task was running."
+            status="failed",
+            error="The server was restarted while this task was running.",
+            error_code="restart_running",
         )
 
     # The task list must tell the same story: a task can't still be
@@ -371,6 +373,11 @@ def read_events() -> list:
 #           model's add_task tool) or "verification" (created by the
 #           orchestrator to check a finished task's work)
 #   status: queued -> running -> done | failed | stopped
+#   error:  an English sentence for the record, written when a task fails
+#           or is stopped — plus error_code, its machine-readable twin
+#           (max_rounds, stopped, cancelled_stop, restart_running,
+#           restart_queued, llm_error, crash), so the dashboard can show the
+#           same outcome in another language without touching the file.
 #
 # Two threads write this file (Flask enqueues, the agent updates), so this
 # is the one place in the system that needs a lock.
@@ -411,6 +418,7 @@ def add_task(text: str, kind: str = "user", parent=None) -> dict:
             "parent": parent,
             "result": None,
             "error": None,
+            "error_code": None,
             "iterations": 0,
             "created": datetime.now().isoformat(timespec="seconds"),
         }
@@ -459,10 +467,12 @@ def repair_tasks_after_restart():
             if t["status"] == "running":
                 t["status"] = "failed"
                 t["error"] = "The server restarted while this task was running."
+                t["error_code"] = "restart_running"
                 changed = True
             elif t["status"] == "queued":
                 t["status"] = "stopped"
                 t["error"] = "Cancelled by server restart."
+                t["error_code"] = "restart_queued"
                 changed = True
         if changed:
             atomic_write_text(TASKS_FILE, json.dumps(tasks, indent=2, ensure_ascii=False))

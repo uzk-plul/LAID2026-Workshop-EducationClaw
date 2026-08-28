@@ -63,6 +63,13 @@ h1 {
   max-width: 280px; cursor: pointer;
 }
 .chip select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 8px rgba(47, 107, 255, 0.35); }
+/* The language switch (EN | DE), next to the help button: two small chips, one lit. */
+.lang-switch { display: inline-flex; gap: 4px; }
+.lang-btn {
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+  padding: 7px 10px; font-size: 11px; font-weight: 600; box-shadow: none;
+}
+.lang-btn.active { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 8px rgba(24, 217, 255, 0.3); }
 
 .badge {
   font-family: var(--pixel); font-size: 9px;
@@ -130,10 +137,6 @@ main {
 /* !important so it also beats id-specific display rules like #tools-list */
 .panel.collapsed > *:not(h2) { display: none !important; }
 .panel.collapsed h2 { margin-bottom: 0; }
-.hint {
-  font-family: "Segoe UI", system-ui, sans-serif;
-  color: var(--muted); letter-spacing: 0; font-weight: normal; font-size: 11px;
-}
 
 /* ---------- task panel (full width, above the columns) ---------- */
 #panel-task { margin-bottom: 20px; }
@@ -491,10 +494,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
 /* chat-style call view */
 .call-meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
-.call-hint {
-  color: var(--muted); font-size: 12px; margin-bottom: 10px; line-height: 1.5;
-}
-.call-hint b { color: var(--lavender); }
 .call-section {
   font-family: var(--pixel); font-size: 9px;
   color: var(--muted); margin: 18px 0 10px;

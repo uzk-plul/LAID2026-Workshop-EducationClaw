@@ -3,67 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>educationclaw-agent — Dashboard</title>
+  <title data-i18n="title">educationclaw-agent — Dashboard</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
+  <!-- Every sentence of the dashboard in English and German. Loaded first,
+       so <html lang> is right before anything is painted. The text in this
+       file is the English original; the data-i18n attributes mark what
+       gets replaced (data-i18n-title / -placeholder for attributes). -->
+  <script src="/static/i18n.js"></script>
 </head>
 <body>
 
   <!-- ======= Header: model, endpoint, status, iteration counter ======= -->
   <header>
     <h1>EDUCATIONCLAW</h1>
-    <button id="help-btn" class="secondary" title="A short explanation of how this agent works">? how it works</button>
-    <div class="header-screen"
-         title="The external screen — a separate program reads message.json, the set_screen tool writes it">
-      <span class="screen-mood" id="screen-mood">NEUTRAL</span>
-      <span class="screen-msg" id="screen-msg">(no message yet)</span>
+    <button id="help-btn" class="secondary" data-i18n="header.help"
+            data-i18n-title="header.help_tip">? how it works</button>
+    <span class="lang-switch" data-i18n-title="header.lang_tip">
+      <button class="lang-btn" data-lang="en">EN</button>
+      <button class="lang-btn" data-lang="de">DE</button>
+    </span>
+    <div class="header-screen" data-i18n-title="header.screen_tip">
+      <span class="screen-mood" id="screen-mood" data-i18n="mood.neutral">NEUTRAL</span>
+      <span class="screen-msg" id="screen-msg" data-i18n="screen.empty">(no message yet)</span>
     </div>
     <div class="header-info">
-      <span class="chip" id="model-chip"
-            title="The model name sent in every request. With several models in .env this is a picker — the choice is saved to settings.json and applies to the next LLM call, even mid-task">
-        model: <b id="model">…</b>
+      <span class="chip" id="model-chip" data-i18n-title="header.model_tip">
+        <span data-i18n="header.model">model:</span> <b id="model">…</b>
         <select id="model-select" hidden></select></span>
-      <span class="chip" title="The OpenAI-compatible endpoint of the selected model (from .env)">
-        endpoint: <b id="endpoint">…</b></span>
-      <span class="chip">key: <b id="apikey">…</b></span>
-      <span class="chip" title="Tokens the model read / wrote in this log (from the API's usage field)">
-        tokens: <b id="tokens">0 / 0</b></span>
-      <span id="status-badge" class="badge idle">IDLE</span>
-      <span class="chip">iteration <b id="iteration">0/0</b></span>
+      <span class="chip" data-i18n-title="header.endpoint_tip">
+        <span data-i18n="header.endpoint">endpoint:</span> <b id="endpoint">…</b></span>
+      <span class="chip"><span data-i18n="header.key">key:</span> <b id="apikey">…</b></span>
+      <span class="chip" data-i18n-title="header.tokens_tip">
+        <span data-i18n="header.tokens_label">tokens:</span> <b id="tokens">0 / 0</b></span>
+      <span id="status-badge" class="badge idle" data-i18n="status.idle">IDLE</span>
+      <span class="chip"><span data-i18n="header.iteration">iteration</span> <b id="iteration">0/0</b></span>
     </div>
   </header>
 
   <!-- ======= Task input: full width, above everything ======= -->
   <section class="panel" id="panel-task">
-    <h2>Task</h2>
+    <h2><span data-i18n="panel.task">Task</span></h2>
     <div class="task-layout">
-      <textarea id="task-input" rows="3"
+      <textarea id="task-input" rows="3" data-i18n-placeholder="task.placeholder"
         placeholder="Give the agent a task, e.g.: Check the current time, then set the screen to a happy greeting that mentions the time. (Ctrl+Enter runs it)"></textarea>
       <div class="task-controls">
         <div class="row">
-          <button id="run-btn">▶ Run task</button>
-          <button id="step-btn" hidden
-                  title="Run one more loop round (shortcut: Space or N)">⏭ Next step</button>
-          <button id="stop-btn" class="danger" hidden>⏹ Stop</button>
-          <button id="reset-btn" class="secondary">Reset logs</button>
-          <button id="reset-all-btn" class="danger"
-                  title="Delete logs, LLM calls, memories, workspace files and restore the brain files — only .env is kept">
-            Reset everything</button>
+          <button id="run-btn" data-i18n="task.run">▶ Run task</button>
+          <button id="step-btn" hidden data-i18n="task.step"
+                  data-i18n-title="task.step_tip">⏭ Next step</button>
+          <button id="stop-btn" class="danger" hidden data-i18n="task.stop">⏹ Stop</button>
+          <button id="reset-btn" class="secondary" data-i18n="task.reset">Reset logs</button>
+          <button id="reset-all-btn" class="danger" data-i18n="task.reset_all"
+                  data-i18n-title="task.reset_all_tip">Reset everything</button>
         </div>
         <div class="settings-row">
-          <label class="step-toggle" title="Pause before every loop round until you press 'Next step' (or Space / N) — great for narrating what happens">
-            <input type="checkbox" id="step-mode-check"> Step-by-step
+          <label class="step-toggle" data-i18n-title="task.step_mode_tip">
+            <input type="checkbox" id="step-mode-check"> <span data-i18n="task.step_mode">Step-by-step</span>
           </label>
-          <label class="step-toggle" title="Every user task first runs as a PLANNER that may only create subtasks (all other tools are refused) — the real work then happens in those subtasks">
-            <input type="checkbox" id="plan-check"> Plan first
+          <label class="step-toggle" data-i18n-title="task.plan_tip">
+            <input type="checkbox" id="plan-check"> <span data-i18n="task.plan">Plan first</span>
           </label>
-          <label class="step-toggle" title="Every finished user task queues a verification task — a fresh agent run that checks the work with its own tools and fixes what it finds">
-            <input type="checkbox" id="verify-check"> Self-verification
+          <label class="step-toggle" data-i18n-title="task.verify_tip">
+            <input type="checkbox" id="verify-check"> <span data-i18n="task.verify">Self-verification</span>
           </label>
-          <label class="step-toggle" title="Hard cap on loop rounds — the agent re-reads this every round, so you can raise it while a task runs">
-            max rounds <input type="number" id="max-iter-input" min="1" max="50">
+          <label class="step-toggle" data-i18n-title="task.max_rounds_tip">
+            <span data-i18n="task.max_rounds">max rounds</span> <input type="number" id="max-iter-input" min="1" max="50">
           </label>
         </div>
       </div>
@@ -81,17 +88,17 @@
     <!-- ======= Left column: state ======= -->
     <div class="col">
       <section class="panel" id="panel-tasks">
-        <h2>Tasks <span class="hint">one at a time — subtasks &amp; verifications run before newer tasks; click a row for its story, round by round</span></h2>
+        <h2><span data-i18n="panel.tasks">Tasks</span></h2>
         <div id="tasks-list"></div>
       </section>
 
       <section class="panel" id="panel-memory">
-        <h2>Memory <span class="hint">saved notes that get pasted into every future prompt — that is all "memory" is</span></h2>
+        <h2><span data-i18n="panel.memory">Memory</span></h2>
         <div id="memory-list"></div>
       </section>
 
       <section class="panel" id="panel-workspace">
-        <h2>Workspace <span class="hint">the only folder the agent may write files in — click a file to open it</span></h2>
+        <h2><span data-i18n="panel.workspace">Workspace</span></h2>
         <div id="workspace-list"></div>
       </section>
     </div>
@@ -101,37 +108,38 @@
       <!-- The heart of the lesson: an agent is a loop around a language
            model. This diagram lights up to show where the agent is NOW. -->
       <section class="panel" id="panel-loop">
-        <h2>The agentic loop <span class="hint">lights up live — this is all an agent is</span></h2>
+        <h2><span data-i18n="panel.loop">The agentic loop</span></h2>
         <div class="loop-steps">
-          <div class="loop-step" id="ls-context"><span class="ls-num">1</span>build context</div>
+          <div class="loop-step" id="ls-context"><span class="ls-num">1</span><span data-i18n="loop.step.context">build context</span></div>
           <span class="loop-arrow">→</span>
-          <div class="loop-step" id="ls-ask"><span class="ls-num">2</span>ask the model</div>
+          <div class="loop-step" id="ls-ask"><span class="ls-num">2</span><span data-i18n="loop.step.ask">ask the model</span></div>
           <span class="loop-arrow">→</span>
-          <div class="loop-step" id="ls-decide"><span class="ls-num">3</span>model picks a tool</div>
+          <div class="loop-step" id="ls-decide"><span class="ls-num">3</span><span data-i18n="loop.step.decide">model picks a tool</span></div>
           <span class="loop-arrow">→</span>
-          <div class="loop-step" id="ls-tool"><span class="ls-num">4</span>run the tool</div>
+          <div class="loop-step" id="ls-tool"><span class="ls-num">4</span><span data-i18n="loop.step.tool">run the tool</span></div>
           <span class="loop-arrow">⟳</span>
-          <div class="loop-step" id="ls-finish"><span class="ls-num">✓</span>finish</div>
+          <div class="loop-step" id="ls-finish"><span class="ls-num">✓</span><span data-i18n="loop.step.finish">finish</span></div>
         </div>
-        <div class="loop-caption" id="loop-caption">Steps 1–4 repeat until the model calls the "finish" tool. Give the agent a task to watch it live.</div>
+        <!-- Filled by renderLoop() while a task runs — what the loop is doing right now. -->
+        <div class="loop-caption" id="loop-caption"></div>
         <div class="loop-queue" id="loop-queue"></div>
       </section>
 
       <section class="panel" id="panel-timeline">
-        <h2>Timeline <span class="hint">the run at a glance — one chip per step; click an LLM chip to open that call</span></h2>
+        <h2><span data-i18n="panel.timeline">Timeline</span></h2>
         <div id="timeline" class="timeline"></div>
       </section>
 
       <section class="panel grow" id="panel-log">
-        <h2>Event log <span class="hint">the run as a plain-English story — click an entry for its technical details</span></h2>
-        <label class="step-toggle log-tech-toggle" title="Reveal the technical line (timestamps, event types, raw arguments) under every entry">
-          <input type="checkbox" id="tech-toggle"> show technical details everywhere
+        <h2><span data-i18n="panel.log">Event log</span></h2>
+        <label class="step-toggle log-tech-toggle" data-i18n-title="log.tech_toggle_tip">
+          <input type="checkbox" id="tech-toggle"> <span data-i18n="log.tech_toggle">show technical details everywhere</span>
         </label>
         <div id="event-log" class="event-log"></div>
       </section>
 
       <section class="panel" id="panel-calls">
-        <h2>LLM calls <span class="hint">every single request to the model — the bar is how much context it read (watch the staircase grow each round); click one to see exactly what it saw and answered</span></h2>
+        <h2><span data-i18n="panel.calls">LLM calls</span></h2>
         <div id="calls-list"></div>
       </section>
     </div>
@@ -139,15 +147,15 @@
 
   <!-- ======= Bottom: the three brain files as tabs ======= -->
   <section class="panel" id="panel-brain">
-    <h2>Brain files <span class="hint">the agent's whole personality and knowledge is just three text files, re-read before every LLM call — edit them live, even mid-task!</span></h2>
+    <h2><span data-i18n="panel.brain">Brain files</span></h2>
     <div class="tabs">
       <button class="tab active" data-file="SYSTEM_PROMPT.md">SYSTEM_PROMPT.md</button>
       <button class="tab" data-file="GHOST.md">GHOST.md</button>
       <button class="tab" data-file="KNOWLEDGE.md">KNOWLEDGE.md</button>
       <span class="tabs-spacer"></span>
-      <button id="brain-edit" class="secondary">✎ Edit</button>
-      <button id="brain-save" hidden>Save</button>
-      <button id="brain-cancel" class="secondary" hidden>Cancel</button>
+      <button id="brain-edit" class="secondary" data-i18n="brain.edit">✎ Edit</button>
+      <button id="brain-save" hidden data-i18n="brain.save">Save</button>
+      <button id="brain-cancel" class="secondary" hidden data-i18n="brain.cancel">Cancel</button>
     </div>
     <pre id="brain-content">…</pre>
     <textarea id="brain-editor" rows="16" hidden spellcheck="false"></textarea>
@@ -155,7 +163,7 @@
 
   <!-- ======= Tools: full width, below the brain files ======= -->
   <section class="panel" id="panel-tools">
-    <h2>Tools <span class="hint">the only actions the model can take — it knows them because they are described in its prompt</span></h2>
+    <h2><span data-i18n="panel.tools">Tools</span></h2>
     <div id="tools-list"></div>
   </section>
 
@@ -165,22 +173,23 @@
       <div class="modal-head">
         <b id="call-modal-title">LLM call</b>
         <span class="modal-actions">
-          <button id="call-modal-raw" class="secondary">show raw file</button>
-          <button id="call-modal-close">✕ close</button>
+          <button id="call-modal-raw" class="secondary" data-i18n="callmodal.show_raw">show raw file</button>
+          <button id="call-modal-close" data-i18n="modal.close">✕ close</button>
         </span>
       </div>
       <div id="call-modal-content" class="call-view"></div>
     </div>
   </div>
 
-  <!-- ======= "How it works" modal ======= -->
+  <!-- ======= "How it works" modal — the prose is written twice, once per
+       language; applyTranslations() shows the block of the current one ======= -->
   <div id="help-modal" class="modal hidden">
     <div class="modal-box">
       <div class="modal-head">
-        <b>How this agent works</b>
-        <button id="help-modal-close">✕ close</button>
+        <b data-i18n="help.title">How this agent works</b>
+        <button id="help-modal-close" data-i18n="modal.close">✕ close</button>
       </div>
-      <div class="help-content">
+      <div class="help-content" lang="en">
         <p><b>An AI agent is a loop around a language model.</b> The model cannot
         do anything by itself — it can only write text. The loop (plain Python
         in <code>agent.py</code>, called the <i>orchestrator</i>) turns that text
@@ -216,6 +225,61 @@
         add a second model to <code>.env</code> (<code>LLM_2_MODEL=…</code>),
         pick it in the header and run the same task again — compare the two
         stories.</p>
+        <p><b>Why is some of it still English?</b> The prompts, the tool
+        descriptions, the tool results and everything the model writes are the
+        conversation with the model — the dashboard shows them exactly as they
+        are in the files. Only the dashboard's own words are translated
+        (switch with EN | DE in the header).</p>
+      </div>
+      <div class="help-content" lang="de" hidden>
+        <p><b>Ein*e KI-Agent*in ist eine Schleife um ein Sprachmodell.</b> Das
+        Modell kann von sich aus nichts tun — es kann nur Text schreiben. Die
+        Schleife (schlichtes Python in <code>agent.py</code>, der
+        <i>Orchestrator</i>) macht aus diesem Text Handlungen:</p>
+        <ol>
+          <li><b>Kontext bauen</b> — die drei Brain-Dateien, die Tool-Liste, alle
+            Erinnerungen und die bisherige Unterhaltung werden zu einem großen
+            Prompt zusammengeklebt.</li>
+          <li><b>Modell fragen</b> — ein ganz gewöhnlicher HTTP-Request
+            (siehe das Panel <i>LLM-Aufrufe</i>: nichts ist versteckt).</li>
+          <li><b>Das Modell wählt ein Tool</b> — seine Antwort endet mit einem
+            kleinen JSON-Block wie <code>{"tool": "get_time", "args": {}}</code>.</li>
+          <li><b>Tool ausführen</b> — der Orchestrator führt genau diese eine
+            Funktion aus und hängt das Ergebnis an die Unterhaltung. Zurück zu
+            Schritt 1.</li>
+        </ol>
+        <p>Die Schleife endet, wenn das Modell das spezielle Tool
+        <code>finish</code> aufruft — fertig zu sein ist einfach ein weiterer
+        Tool-Aufruf.</p>
+        <p><b>Aufgaben stellen sich in eine Warteschlange</b> und laufen
+        nacheinander. Das Modell kann große Arbeit mit seinem Tool
+        <code>add_task</code> in Teilaufgaben zerlegen — und mit <i>Erst planen</i>
+        MUSS es das: Die Aufgabe läuft dann als reine*r Planer*in, deren*dessen
+        einziges erlaubtes Tool <code>add_task</code> ist. Mit
+        <i>Selbstprüfung</i> reiht jede abgeschlossene Aufgabe eine Prüfaufgabe
+        ein — einen frischen Lauf, der die Arbeit kontrolliert. Teilaufgaben und
+        Prüfungen laufen vor neueren Nutzer*innenaufgaben.</p>
+        <p><b>Alles ist eine Datei.</b> Erinnerungen, Logs, jeder LLM-Aufruf,
+        sogar die Knöpfe (sie setzen Flag-Dateien). Wer den Ordner
+        <code>agent_data/</code> in einem Texteditor öffnet, sieht genau das,
+        was dieses Dashboard zeigt.</p>
+        <p><b>Zum Ausprobieren:</b> den <i>Schritt-für-Schritt-Modus</i>
+        einschalten und jede Runde kommentieren · LLM-Aufruf #001 öffnen und die
+        Brain-Dateien in der Anfrage wiederfinden · KNOWLEDGE.md bearbeiten,
+        während eine Aufgabe läuft · eine Screen-Stimmung „angry“ verlangen und
+        zusehen, wie sich das Modell vom Tool-Fehler erholt · eine große
+        mehrteilige Aufgabe stellen und beobachten, wie es Teilaufgaben mit
+        <code>add_task</code> abspaltet · <i>Selbstprüfung</i> einschalten und
+        einen frischen Lauf die Arbeit nachprüfen lassen · ein zweites Modell in
+        <code>.env</code> eintragen (<code>LLM_2_MODEL=…</code>), es oben
+        auswählen und dieselbe Aufgabe noch einmal laufen lassen — die beiden
+        Geschichten vergleichen.</p>
+        <p><b>Warum bleibt manches Englisch?</b> Die Prompts, die
+        Tool-Beschreibungen, die Tool-Ergebnisse und alles, was das Modell
+        selbst schreibt, sind die Unterhaltung mit dem Modell — das Dashboard
+        zeigt sie genau so, wie sie in den Dateien stehen. Übersetzt sind nur
+        die eigenen Worte des Dashboards (umschalten mit EN | DE im Kopf der
+        Seite).</p>
       </div>
     </div>
   </div>

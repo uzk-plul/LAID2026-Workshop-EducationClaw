@@ -234,6 +234,9 @@ def finish_task(task, status: str, **fields):
         iterations=s.get("iteration"),
         result=s.get("result"),
         error=s.get("error"),
+        # The machine-readable twin of the English error sentence (see
+        # storage.py) — the dashboard translates it, the sentence stays.
+        error_code=s.get("error_code"),
     )
     # A task ended — retell the story of every top-level task in
     # logs/narratives.md (this task's own family included).
@@ -252,7 +255,12 @@ def run_queue():
         if outcome == "stopped":
             # Stop means stop EVERYTHING: cancel whatever is still queued.
             while (leftover := claim_next_task()) is not None:
-                update_task(leftover["id"], status="stopped", error="Cancelled by Stop.")
+                update_task(
+                    leftover["id"],
+                    status="stopped",
+                    error="Cancelled by Stop.",
+                    error_code="cancelled_stop",
+                )
             write_narratives()  # the cancelled tasks are part of the story too
             consume_flag(STOP_FILE)  # the flag did its job — clear it
             return
@@ -315,6 +323,7 @@ def run_one(task) -> str:
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "result": None,
             "error": None,
+            "error_code": None,
         }
     )
     log_event(
@@ -344,6 +353,7 @@ def run_one(task) -> str:
                     task,
                     "failed",
                     error=f"Gave up after {max_iterations} rounds (the model never called finish).",
+                    error_code="max_rounds",
                 )
                 log_event("task_failed", error="max iterations reached")
                 return "failed"
@@ -351,7 +361,7 @@ def run_one(task) -> str:
             # Both control checks live between iterations — one loop round
             # (one LLM call + one tool) always finishes as a whole.
             if not wait_if_step_mode(iteration) or consume_flag(STOP_FILE):
-                finish_task(task, "stopped", error="Stopped by user.")
+                finish_task(task, "stopped", error="Stopped by user.", error_code="stopped")
                 log_event("task_stopped")
                 return "stopped"
 
@@ -468,16 +478,18 @@ def run_one(task) -> str:
         # If the LLM call died because the user pressed Stop, say
         # "stopped", not "failed" — the honest outcome.
         if consume_flag(STOP_FILE):
-            finish_task(task, "stopped", error="Stopped by user.")
+            finish_task(task, "stopped", error="Stopped by user.", error_code="stopped")
             log_event("task_stopped")
             return "stopped"
-        finish_task(task, "failed", error=str(exc))
+        finish_task(task, "failed", error=str(exc), error_code="llm_error")
         log_event("task_failed", error=str(exc)[:300])
         return "failed"
 
     except Exception as exc:
         # A bug in our own code — never leave the dashboard stuck on
         # RUNNING because of it.
-        finish_task(task, "failed", error=f"Unexpected crash in the agent loop: {exc!r}")
+        finish_task(
+            task, "failed", error=f"Unexpected crash in the agent loop: {exc!r}", error_code="crash"
+        )
         log_event("task_failed", error=repr(exc)[:300])
         return "failed"

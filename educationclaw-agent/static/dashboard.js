@@ -6,9 +6,20 @@
  * and re-render every panel from that single JSON payload.
  * The server, in turn, only reads plaintext files. No websockets,
  * no framework, no hidden state.
+ *
+ * Every sentence the dashboard says comes from i18n.js (English / German)
+ * through t(). Three rules keep the HTML escaping straight:
+ *   1. el.textContent = t("key")               — plain text, always safe
+ *   2. `…${esc(t("key"))}…` inside innerHTML   — the same rule as for all data
+ *   3. tHtml("key", params)                    — ONLY for the few keys whose
+ *      text contains <b> tags: the params are escaped, the template is not
  */
 
 const $ = (id) => document.getElementById(id);
+
+// Static page text (headings, buttons, tooltips, the help prose) is filled
+// in once; the render functions below handle everything that changes.
+applyTranslations();
 
 let lastState = null;         // the most recent /api/state payload
 let renderedEventCount = 0;   // so we only append NEW log lines
@@ -81,16 +92,14 @@ pollBrain();
 
 function renderHeader(state) {
   renderModelPicker(state.config);
-  $("endpoint").textContent = state.config.endpoint || "(not set)";
-  $("apikey").textContent = state.config.api_key_masked;
+  $("endpoint").textContent = state.config.endpoint || t("header.not_set");
+  $("apikey").textContent = state.config.api_key_masked || t("header.not_set");
 
   const s = state.status.status; // idle | running | paused | done | failed | stopped
+  const key = statusKey(state.status);
   const badge = $("status-badge");
-  // While a verification or planning task runs, say so instead of RUNNING.
-  const verifying = (s === "running" && state.status.kind === "verification");
-  const planning = (s === "running" && state.status.planning);
-  badge.textContent = verifying ? "VERIFYING" : planning ? "PLANNING" : s.toUpperCase();
-  badge.className = "badge " + (verifying ? "verifying" : planning ? "planning" : s);
+  badge.textContent = t("status." + key);
+  badge.className = "badge " + key;
   const maxIter = (s === "running" || s === "paused")
     ? state.status.max_iterations : state.settings.max_iterations;
   $("iteration").textContent = `${state.status.iteration}/${maxIter}`;
@@ -102,11 +111,11 @@ function renderHeader(state) {
   for (const e of state.events) {
     if (e.type === "llm_call_done") { tin += e.tokens_in || 0; tout += e.tokens_out || 0; }
   }
-  $("tokens").textContent = `${fmtTokens(tin)} read / ${fmtTokens(tout)} written`;
+  $("tokens").textContent = t("header.tokens", { in: fmtTokens(tin), out: fmtTokens(tout) });
 
   const busy = (s === "running" || s === "paused");
   // Submitting while busy is fine now — the task just joins the queue.
-  $("run-btn").textContent = busy ? "＋ Queue task" : "▶ Run task";
+  $("run-btn").textContent = t(busy ? "task.queue" : "task.run");
   $("reset-btn").disabled = busy;
   $("reset-all-btn").disabled = busy;
   $("stop-btn").hidden = !busy;
@@ -133,8 +142,21 @@ function renderHeader(state) {
   }
 }
 
+// The label of the status badge / chip. While a verification or planning
+// task runs, say so instead of RUNNING. The key doubles as the CSS class.
+function statusKey(status) {
+  const s = status.status;
+  if (s === "running" && status.kind === "verification") return "verifying";
+  if (s === "running" && status.planning) return "planning";
+  return s;
+}
+
 function fmtTokens(n) {
-  return n >= 10000 ? (n / 1000).toFixed(1) + "k" : String(n);
+  return n >= 10000 ? fmt1(n / 1000) + "k" : String(n);
+}
+// One decimal, in the dashboard's language: 12.3 (en) / 12,3 (de).
+function fmt1(x) {
+  return x.toLocaleString(LANG, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 // The model picker: with one model in .env it is a plain label, with
@@ -147,7 +169,7 @@ function renderModelPicker(config) {
   $("model").hidden = !single;
   sel.hidden = single;
   if (single) {
-    $("model").textContent = config.model || "(not set)";
+    $("model").textContent = config.model || t("header.not_set");
     return;
   }
   const key = JSON.stringify(models);
@@ -172,23 +194,23 @@ function renderModelPicker(config) {
 // We don't need any extra state for this — the last event tells us.
 // ---------------------------------------------------------------------------
 
-const LOOP_PHASE = {   // last event type -> [step element, caption]
-  iteration_start: ["ls-context", "Pasting the brain files, tools, memories and the conversation into one big prompt…"],
-  paused:          ["ls-context", "Paused before the next round — press 'Next step' to continue."],
-  llm_call_start:  ["ls-ask",     "The whole prompt is on its way to the model — waiting for the answer…"],
-  llm_call_error:  ["ls-ask",     "The model could not be reached — retrying…"],
-  llm_call_done:   ["ls-decide",  "Answer received — looking for the JSON tool call at the end of the reply…"],
-  protocol_error:  ["ls-decide",  "The reply broke the one-tool-call rule — the model is told what happened and continues."],
-  tool_call:       ["ls-tool",    "The orchestrator is executing the tool the model chose…"],
-  tool_result:     ["ls-tool",    "Tool finished — its result is appended to the conversation, then the loop repeats."],
-  task_done:       ["ls-finish",  "The model called 'finish' — the loop has ended."],
+const LOOP_PHASE = {   // last event type -> [step element, caption key (see i18n.js)]
+  iteration_start: ["ls-context", "loop.phase.iteration_start"],
+  paused:          ["ls-context", "loop.phase.paused"],
+  llm_call_start:  ["ls-ask",     "loop.phase.llm_call_start"],
+  llm_call_error:  ["ls-ask",     "loop.phase.llm_call_error"],
+  llm_call_done:   ["ls-decide",  "loop.phase.llm_call_done"],
+  protocol_error:  ["ls-decide",  "loop.phase.protocol_error"],
+  tool_call:       ["ls-tool",    "loop.phase.tool_call"],
+  tool_result:     ["ls-tool",    "loop.phase.tool_result"],
+  task_done:       ["ls-finish",  "loop.phase.task_done"],
 };
 // task_queued is logged for user tasks, subtasks and verifications alike —
 // the caption depends on which kind it was.
 const QUEUED_PHASE = {
-  verification: ["ls-finish", "A verification task was queued — a fresh run will now check this work."],
-  subtask:      ["ls-tool",   "The model queued a subtask — it will run as its own fresh agent run later."],
-  user:         [null,        "A new task joined the queue — it starts as soon as the agent is free."],
+  verification: ["ls-finish", "loop.queued.verification"],
+  subtask:      ["ls-tool",   "loop.queued.subtask"],
+  user:         [null,        "loop.queued.user"],
 };
 
 function renderLoop(state) {
@@ -198,24 +220,23 @@ function renderLoop(state) {
   const phase = last && (last.type === "task_queued"
     ? QUEUED_PHASE[last.kind] || QUEUED_PHASE.user
     : LOOP_PHASE[last.type]);
-  const idle = 'Steps 1–4 repeat until the model calls the "finish" tool. '
-             + "Give the agent a task to watch it live.";
-  const [active, caption] = (busy || s === "done") && phase ? phase : [null, idle];
+  const [active, captionKey] = (busy || s === "done") && phase ? phase : [null, null];
   for (const id of ["ls-context", "ls-ask", "ls-decide", "ls-tool", "ls-finish"]) {
     $(id).classList.toggle("active", id === active);
   }
   const cap = $("loop-caption");
+  const caption = captionKey ? t(captionKey) : "";   // idle: nothing to narrate
   if (cap.textContent !== caption) cap.textContent = caption;
 
   // The outer loop: which task is this, and how many are waiting?
-  const waiting = state.tasks.filter(t => t.status === "queued").length;
+  const waiting = state.tasks.filter(x => x.status === "queued").length;
   let info = "";
   if (busy) {
-    info = `running task ${state.status.label || state.status.task_id}${
-      state.status.kind !== "user" ? " · " + state.status.kind : ""}${
-      waiting ? ` · ${waiting} waiting in the queue` : ""}`;
+    info = t("loop.running_task", { label: state.status.label || state.status.task_id })
+         + (state.status.kind !== "user" ? " · " + t("kind." + state.status.kind) : "")
+         + (waiting ? " · " + t("loop.waiting_suffix", { n: waiting }) : "");
   } else if (waiting) {
-    info = `${waiting} task(s) waiting in the queue`;
+    info = t("loop.waiting", { n: waiting });
   }
   const q = $("loop-queue");
   if (q.textContent !== info) q.textContent = info;
@@ -233,36 +254,47 @@ function renderTask(status, tasks) {
   // human label instead (the full text is one click away in Tasks).
   let label = status.task || "";
   if (status.kind === "verification") {
-    label = `Verifying the work of task ${parentLabel(status)}`;
+    label = t("task.verifying", { label: parentLabel(status) });
   } else if (label.length > 260) {
     label = label.slice(0, 260) + "…";
   }
 
-  let state = s.toUpperCase();
-  if (s === "running" && status.kind === "verification") state = "VERIFYING";
-  else if (s === "running" && status.planning) state = "PLANNING";
-  $("ts-state").textContent = state;
+  $("ts-state").textContent = t("status." + statusKey(status));
   box.className = "task-status ts-" + s;
 
   const result = $("task-result");
-  if (s === "done")         result.textContent = status.result || "done";
-  else if (s === "failed")  result.textContent = status.error || "failed";
-  else if (s === "stopped") result.textContent = "Stopped by you.";
-  else if (s === "paused")  result.textContent = "Paused — press 'Next step' for the next round.";
-  else if (s === "running") result.textContent = `Working — round ${status.iteration || 1}…`;
+  if (s === "done")         result.textContent = outcomeText(status) || t("task.result_done");
+  else if (s === "failed")  result.textContent = outcomeText(status) || t("task.result_failed");
+  else if (s === "stopped") result.textContent = t("task.stopped");
+  else if (s === "paused")  result.textContent = t("task.paused");
+  else if (s === "running") result.textContent = t("task.working", { n: status.iteration || 1 });
   else                      result.textContent = "";
 
-  $("task-current").textContent = `task ${status.label || ""}: ${label}`;
+  $("task-current").textContent = t("task.current", { label: status.label || "", text: label });
+}
+
+// The outcome of a task (or of status.json): its result, or its error
+// sentence. The orchestrator writes that sentence in English and attaches an
+// error_code (see storage.py) — a known code is shown in the dashboard's
+// language; anything else (an LLM error, a crash) is shown as stored,
+// because the message itself is the information.
+function outcomeText(x) {
+  if (x.result) return x.result;
+  const key = "outcome." + x.error_code;
+  if (x.error_code && I18N[key]) return t(key, { n: x.iterations ?? x.iteration ?? 0 });
+  return x.error || "";
 }
 
 function renderTools(tools) {
-  setHTML($("tools-list"), tools.map(t => `
+  // Names, descriptions and arguments are the literal prompt text (see
+  // tools.py) — shown as the model reads them, so they are not translated.
+  setHTML($("tools-list"), tools.map(tool => `
     <div class="tool">
-      <div class="tool-name">${esc(t.name)}</div>
-      <div class="tool-desc">${esc(t.description)}</div>
+      <div class="tool-name">${esc(tool.name)}</div>
+      <div class="tool-desc">${esc(tool.description)}</div>
       <div class="tool-args">${
-        Object.entries(t.args).map(([a, d]) => `<b>${esc(a)}</b>: ${esc(d)}`).join("<br>")
-        || "no arguments"
+        Object.entries(tool.args).map(([a, d]) => `<b>${esc(a)}</b>: ${esc(d)}`).join("<br>")
+        || esc(t("tools.no_args"))
       }</div>
     </div>`).join(""));
 }
@@ -273,9 +305,9 @@ function renderScreen(screen) {
   const mood = screen && ["happy", "neutral", "sad"].includes(screen.mood)
     ? screen.mood : "neutral";
   const badge = $("screen-mood");
-  badge.textContent = mood.toUpperCase();
+  badge.textContent = t("mood." + mood);
   badge.className = "screen-mood mood-" + mood;
-  $("screen-msg").textContent = screen ? screen.message : "(no message yet)";
+  $("screen-msg").textContent = screen ? screen.message : t("screen.empty");
 }
 
 // ---------------------------------------------------------------------------
@@ -294,12 +326,14 @@ function renderTimeline(events) {
     if (e.type === "task_start") {
       const what = e.kind === "verification" ? "verify" : e.planning ? "plan" : "task";
       const name = e.label || (e.task_id != null ? "#" + e.task_id : "");
-      chip("task", `⚑ ${what} ${name}`.trim(), e.task || "");
+      chip("task", `⚑ ${t("timeline.kind." + what)} ${name}`.trim(), e.task || "");
     } else if (e.type === "llm_call_done") {
-      const tokens = e.tokens_in != null
-        ? `${e.tokens_in} tokens in, ${e.tokens_out} out — ` : "";
-      const model = e.model ? `${e.model} — ` : "";
-      chip("llm", `LLM #${e.call_id}`, model + tokens + "click to open", e.call_id);
+      const tip = [
+        e.model,
+        e.tokens_in != null ? t("timeline.tokens", { in: e.tokens_in, out: e.tokens_out }) : "",
+        t("timeline.click_open"),
+      ].filter(Boolean).join(" — ");
+      chip("llm", `LLM #${e.call_id}`, tip, e.call_id);
     } else if (e.type === "llm_call_error") {
       chip("err", "LLM ✗", e.error || "");
     } else if (e.type === "tool_result") {
@@ -307,25 +341,24 @@ function renderTimeline(events) {
       chip(failed ? "err" : "tool", (failed ? "✗ " : "") + e.tool,
            (e.result || "").slice(0, 160));
     } else if (e.type === "protocol_error") {
-      chip("err", "✗ protocol", "The reply broke the one-tool-call rule.");
+      chip("err", "✗ " + t("timeline.protocol"), t("timeline.protocol_tip"));
     } else if (e.type === "planning_incomplete") {
-      chip("err", "✗ empty plan", "Tried to finish planning without subtasks.");
+      chip("err", "✗ " + t("timeline.empty_plan"), t("timeline.empty_plan_tip"));
     } else if (e.type === "task_done") {
-      chip("done", "✓ done", e.summary || "");
+      chip("done", "✓ " + t("timeline.done"), e.summary || "");
     } else if (e.type === "task_failed") {
-      chip("err", "✗ failed", e.error || "");
+      chip("err", "✗ " + t("timeline.failed"), e.error || "");
     } else if (e.type === "task_stopped") {
-      chip("stop", "⏹ stopped", "");
+      chip("stop", "⏹ " + t("timeline.stopped"), "");
     }
   }
   setHTML($("timeline"), chips.join("") ||
-    `<div class="empty">Every step will appear here as a small chip —
-     tasks, LLM calls, tools — the whole run at a glance.</div>`);
+    `<div class="empty">${esc(t("timeline.empty"))}</div>`);
   const tl = $("timeline");
   if (chips.length) tl.scrollTop = tl.scrollHeight;
 }
 
-// The log is a plain-English STORY. Technical details exist under every
+// The log is a plain-language STORY. Technical details exist under every
 // entry but stay hidden until you click the entry (or flip the global
 // "show technical details" switch). Pairs of events are merged into one
 // line: "asking the model…" updates in place when the answer arrives,
@@ -347,40 +380,83 @@ function fillEvent(div, type, headlineHtml, e, extra = "") {
   div.innerHTML = `<div class="ev-note">${headlineHtml}${extra}</div>` + techLine(e);
 }
 
+// storage.describe_event() writes an English sentence into every line of
+// events.jsonl, so the file explains itself. Here the same sentence is
+// re-told in the dashboard's language from the event's own fields (the
+// templates are the "event.*" entries in i18n.js). Unknown event types
+// fall back to the stored note.
+function noteFor(e) {
+  switch (e.type) {
+    case "task_start":
+      return t(e.kind === "verification" ? "event.task_start.verification"
+             : e.planning ? "event.task_start.planning" : "event.task_start");
+    case "planning_incomplete":
+      return t("event.planning_incomplete");
+    case "task_queued":
+      return t(e.kind === "verification" ? "event.task_queued.verification"
+             : e.kind === "subtask" ? "event.task_queued.subtask" : "event.task_queued");
+    case "iteration_start":
+      return t("event.iteration_start", { iteration: e.iteration });
+    case "llm_call_start":
+      return t("event.llm_call_start",
+               { model: e.model || t("event.the_model"), call_id: e.call_id });
+    case "llm_call_done":
+      return e.tokens_in != null
+        ? t("event.llm_call_done.tokens",
+            { duration: e.duration, tokens_in: e.tokens_in, tokens_out: e.tokens_out })
+        : t("event.llm_call_done", { duration: e.duration });
+    case "llm_call_error":
+      return t(e.attempt === 1 ? "event.llm_call_error.first" : "event.llm_call_error.again");
+    case "tool_call":
+      return t("event.tool_call", { tool: e.tool });
+    case "tool_result":
+      return t(String(e.result || "").startsWith("TOOL ERROR")
+               ? "event.tool_result.refused" : "event.tool_result", { tool: e.tool });
+    case "protocol_error":
+      return (e.count || 0) > 1
+        ? t("event.protocol_error.many", { count: e.count })
+        : t("event.protocol_error");
+    case "task_done": case "task_failed": case "task_stopped": case "paused":
+      return t("event." + e.type);
+    default:
+      return e.note || "";
+  }
+}
+
 function addEvent(log, e) {
   // Task and round boundaries render as dividers, not entries.
   if (e.type === "task_start") {
     const div = document.createElement("div");
     div.className = "task-divider new";
-    const title = `⚑ TASK ${esc(e.label || "")}: ${esc((e.task || "").slice(0, 160))}`;
+    const title = t("log.task_divider", { label: e.label || "", text: (e.task || "").slice(0, 160) });
     div.innerHTML =
-      `<div class="td-title">${title}</div>` +
+      `<div class="td-title">${esc(title)}</div>` +
       `<div class="ev-tech"><span class="t">${esc(e.time.slice(11))}</span> ` +
-      `${esc(e.note || "")}</div>`;
+      `${esc(noteFor(e))}</div>`;
     log.appendChild(div);
     return;
   }
   if (e.type === "iteration_start") {
     const div = document.createElement("div");
     div.className = "round-divider new";
-    div.textContent = `· round ${e.iteration} ·`;
+    div.textContent = t("log.round", { n: e.iteration });
     log.appendChild(div);
     return;
   }
 
   if (e.type === "llm_call_start") {
     const div = document.createElement("div");
-    fillEvent(div, "llm_call_start", `Asking the model…`, e);
+    fillEvent(div, "llm_call_start", esc(t("log.asking")), e);
     pendingLLM[e.call_id] = div;
     log.appendChild(div);
     return;
   }
   if (e.type === "llm_call_done" || e.type === "llm_call_error") {
     const div = pendingLLM[e.call_id] || document.createElement("div");
-    const open = `<span class="ev-open">call #${e.call_id} ↗</span>`;
-    fillEvent(div, e.type, esc(e.note || ""), e, e.type === "llm_call_done" ? open : "");
+    const open = `<span class="ev-open">${esc(t("log.open_call", { id: e.call_id }))}</span>`;
+    fillEvent(div, e.type, esc(noteFor(e)), e, e.type === "llm_call_done" ? open : "");
     if (e.type === "llm_call_done") {
-      div.title = "Click to open the full request and response";
+      div.title = t("log.click_open");
       div.onclick = () => openCall(String(e.call_id).padStart(3, "0"));
       delete pendingLLM[e.call_id];
     }
@@ -390,7 +466,7 @@ function addEvent(log, e) {
 
   if (e.type === "tool_call") {
     const div = document.createElement("div");
-    fillEvent(div, "tool_call", `Running <b>${esc(e.tool)}</b>…`, e);
+    fillEvent(div, "tool_call", tHtml("log.tool_running", { tool: e.tool }), e);
     pendingTool = div;
     log.appendChild(div);
     return;
@@ -400,20 +476,19 @@ function addEvent(log, e) {
     pendingTool = null;
     const r = String(e.result || "");
     const failed = r.startsWith("TOOL ERROR");
-    const snippet = (failed ? r.slice(11) : r).trim().slice(0, 150);
+    const snippet = (failed ? r.slice(10).replace(/^[:\s]+/, "") : r).trim().slice(0, 150);
     fillEvent(div, failed ? "tool_error" : "tool_result",
-      failed ? `<b>${esc(e.tool)}</b> refused —${esc(snippet)}`
-             : `<b>${esc(e.tool)}</b> → ${esc(snippet)}`, e);
-    div.title = "Click for the technical details";
+      tHtml(failed ? "log.tool_refused" : "log.tool_returned", { tool: e.tool, snippet }), e);
+    div.title = t("log.click_tech");
     div.onclick = () => div.classList.toggle("show-tech");
     if (!div.parentNode) log.appendChild(div);
     return;
   }
 
-  // Everything else: one plain-English line (details on click).
+  // Everything else: one plain-language line (details on click).
   const div = document.createElement("div");
-  fillEvent(div, e.type, esc(e.note || e.type), e);
-  div.title = "Click for the technical details";
+  fillEvent(div, e.type, esc(noteFor(e) || e.type), e);
+  div.title = t("log.click_tech");
   div.onclick = () => div.classList.toggle("show-tech");
   log.appendChild(div);
 }
@@ -432,8 +507,7 @@ function renderEvents(events, offset, total) {
   // Nothing happened yet: explain what this panel will show.
   if (!total) {
     if (!log.querySelector(".empty")) {
-      log.innerHTML = `<div class="empty">Nothing yet. Give the agent a task
-        and the story of the run will appear here, step by step.</div>`;
+      log.innerHTML = `<div class="empty">${esc(t("log.empty"))}</div>`;
     }
     return;
   }
@@ -469,9 +543,7 @@ function renderEvents(events, offset, total) {
 function renderCalls(calls, events) {
   const box = $("calls-list");
   if (!calls.length) {
-    setHTML(box, `<div class="empty">No calls yet. Each request to the model
-      will be listed here — the full prompt and the full answer, nothing
-      hidden.</div>`);
+    setHTML(box, `<div class="empty">${esc(t("calls.empty"))}</div>`);
     return;
   }
   // Token counts, task attribution and loop round per call all come from
@@ -498,32 +570,33 @@ function renderCalls(calls, events) {
   lastHTML["calls-list"] = key;
   box.innerHTML = "";
   const labelById = {};
-  for (const t of (lastState?.tasks || [])) labelById[t.id] = tlabel(t);
+  for (const task of (lastState?.tasks || [])) labelById[task.id] = tlabel(task);
   for (const c of calls) {
     const failed = c.id.includes("_error");
     const base = c.id.slice(0, 3);
-    const t = callTask[base];
-    const forTask = t != null ? ` · task ${labelById[t] ?? t}` : "";
-    const forRound = callRound[base] != null ? ` · round ${callRound[base]}` : "";
+    const taskId = callTask[base];
+    const forTask = taskId != null
+      ? " · " + t("calls.task", { label: labelById[taskId] ?? taskId }) : "";
+    const forRound = callRound[base] != null
+      ? " · " + t("calls.round", { n: callRound[base] }) : "";
     const div = document.createElement("div");
     div.className = "call-item" + (failed ? " failed" : "");
     const row = document.createElement("div");
     row.className = "call-row";
     const label = document.createElement("span");
-    label.textContent = failed
-      ? `▸ call #${base} (failed attempt)${forTask}${forRound}`
-      : `▸ call #${c.id}${forTask}${forRound}`;
+    label.textContent = "▸ " + (failed
+      ? t("calls.item_failed", { id: base })
+      : t("calls.item", { id: c.id })) + forTask + forRound;
     const meta = document.createElement("span");
     meta.className = "sz";
-    meta.textContent = [tokens[c.id], (c.size / 1024).toFixed(1) + " kB"]
+    meta.textContent = [tokens[c.id], fmt1(c.size / 1024) + " kB"]
       .filter(Boolean).join(" · ");
     row.append(label, meta);
     div.append(row);
     if (tokensIn[c.id] != null) {
       const bar = document.createElement("div");
       bar.className = "call-bar";
-      bar.title = `${tokensIn[c.id].toLocaleString()} tokens of context went into this call `
-                + `(the longest call in this list = full width)`;
+      bar.title = t("calls.bar_tip", { n: tokensIn[c.id].toLocaleString(LANG) });
       const fill = document.createElement("span");
       fill.style.width = Math.max(1, (tokensIn[c.id] / maxIn) * 100) + "%";
       bar.appendChild(fill);
@@ -537,9 +610,7 @@ function renderCalls(calls, events) {
 function renderMemories(memories) {
   const names = Object.keys(memories);
   if (!names.length) {
-    setHTML($("memory-list"), `<div class="empty">Empty. When the agent uses
-      its save_memory tool, one small text file appears here — and gets
-      pasted into every future prompt.</div>`);
+    setHTML($("memory-list"), `<div class="empty">${esc(t("memory.empty"))}</div>`);
     return;
   }
   setHTML($("memory-list"), names.map(name => `
@@ -552,8 +623,7 @@ function renderMemories(memories) {
 function renderWorkspace(files) {
   const box = $("workspace-list");
   if (!files.length) {
-    setHTML(box, `<div class="empty">Empty. Ask the agent to create a file
-      (e.g. "write a poem into poem.txt") and it will show up here.</div>`);
+    setHTML(box, `<div class="empty">${esc(t("workspace.empty"))}</div>`);
     return;
   }
   const key = JSON.stringify(files);
@@ -567,7 +637,7 @@ function renderWorkspace(files) {
     label.textContent = "▸ " + f.name;
     const size = document.createElement("span");
     size.className = "sz";
-    size.textContent = (f.size / 1024).toFixed(1) + " kB";
+    size.textContent = fmt1(f.size / 1024) + " kB";
     div.append(label, size);
     div.addEventListener("click", () => openWorkspaceFile(f.name));
     box.appendChild(div);
@@ -576,48 +646,51 @@ function renderWorkspace(files) {
 
 function renderTasks(tasks) {
   if (!tasks.length) {
-    setHTML($("tasks-list"), `<div class="empty">No tasks yet. Submitted
-      tasks line up here and run one at a time — with self-verification
-      on, each finished task queues its own verification task.</div>`);
+    setHTML($("tasks-list"), `<div class="empty">${esc(t("tasks.empty"))}</div>`);
     return;
   }
   // Group by family: newest user task first, then its children (subtasks,
   // verifications — recursively) indented beneath it, oldest first.
   const children = (id) =>
     tasks.filter(c => c.parent === id).flatMap(c => [c, ...children(c.id)]);
-  const roots = tasks.filter(t => t.parent == null).reverse();
+  const roots = tasks.filter(x => x.parent == null).reverse();
   const ordered = roots.flatMap(r => [r, ...children(r.id)]);
   // Safety net: show orphans (parent missing) rather than losing them.
-  for (const t of tasks) if (!ordered.includes(t)) ordered.push(t);
+  for (const x of tasks) if (!ordered.includes(x)) ordered.push(x);
 
   const icons = { queued: "⏳", running: "▶", done: "✔", failed: "✘", stopped: "⏹" };
-  setHTML($("tasks-list"), ordered.map(t => `
-    <div class="history-item ${esc(t.status)} ${esc(t.kind)}"
-         onclick="openTask(${Number(t.id)})" title="click for details">
+  setHTML($("tasks-list"), ordered.map(task => `
+    <div class="history-item ${esc(task.status)} ${esc(task.kind)}"
+         onclick="openTask(${Number(task.id)})" title="${esc(t("tasks.click"))}">
       <div class="hist-head">
-        <span class="hist-icon">${icons[t.status] || "•"}</span>
+        <span class="hist-icon">${icons[task.status] || "•"}</span>
         <span class="hist-task">${
-          t.kind === "verification"
-            ? `↳ ${esc(tlabel(t))} · verification of ${esc(parentLabel(t))}`
-          : t.kind === "subtask"
-            ? `↳ ${esc(tlabel(t))} · ${esc(t.task || "")}`
-            : `Task ${esc(tlabel(t))} · ${esc(t.task || "")}`}</span>
-        ${t.status === "running" ? `<span class="hist-now">NOW</span>` : ""}
-        <span class="hist-time">${esc((t.created || "").slice(11, 16))}</span>
+          task.kind === "verification"
+            ? esc(t("tasks.verification_of", { label: tlabel(task), parent: parentLabel(task) }))
+          : task.kind === "subtask"
+            ? `↳ ${esc(tlabel(task))} · ${esc(task.task || "")}`
+            : `${esc(t("tasks.task", { label: tlabel(task) }))} · ${esc(task.task || "")}`}</span>
+        ${task.status === "running" ? `<span class="hist-now">${esc(t("tasks.now"))}</span>` : ""}
+        <span class="hist-time">${esc((task.created || "").slice(11, 16))}</span>
       </div>
-      <div class="hist-result">${esc(t.result || t.error ||
-          (t.status === "queued" ? "waiting in the queue…" : ""))}
-        ${t.iterations ? `<span class="hist-iters">· ${t.iterations} rounds</span>` : ""}</div>
+      <div class="hist-result">${esc(outcomeText(task) ||
+          (task.status === "queued" ? t("tasks.waiting") : ""))}
+        ${task.iterations
+          ? `<span class="hist-iters">· ${esc(t("tasks.rounds", { n: task.iterations }))}</span>`
+          : ""}</div>
     </div>`).join(""));
 }
 
 // Click a task row: show its full description, outcome and STORY — the
 // run retold round by round, subtasks and verifications included.
 async function openTask(id) {
-  const t = (lastState?.tasks || []).find(x => x.id === id);
-  if (!t) return;
-  $("call-modal-title").textContent =
-    `Task ${tlabel(t)} · ${t.kind} · ${t.status}`;
+  const task = (lastState?.tasks || []).find(x => x.id === id);
+  if (!task) return;
+  $("call-modal-title").textContent = t("taskmodal.title", {
+    label: tlabel(task),
+    kind: t("kind." + task.kind),
+    status: t("status." + task.status).toLowerCase(),
+  });
   $("call-modal-raw").style.display = "none";
   const box = $("call-modal-content");
   box.innerHTML = "";
@@ -631,31 +704,27 @@ async function openTask(id) {
     pre.textContent = text;
     box.append(h, pre);
   };
-  mk("TASK DESCRIPTION — what this run was told to do", t.task);
-  mk("OUTCOME", t.result || t.error ||
-     (t.status === "queued" ? "Still waiting in the queue." : "Still running."));
+  mk(t("taskmodal.description"), task.task);
+  mk(t("taskmodal.outcome"), outcomeText(task) ||
+     (task.status === "queued" ? t("taskmodal.still_queued") : t("taskmodal.still_running")));
 
-  // The story is assembled server-side from the event log — the same
-  // text is in agent_data/logs/narratives.md for every top-level task.
+  // The story is assembled server-side from the event log — in the
+  // dashboard's language on request; the same text in English is in
+  // agent_data/logs/narratives.md for every top-level task.
   const h = document.createElement("div");
   h.className = "call-section";
-  h.textContent = "THE STORY — what happened, round by round";
-  const hint = document.createElement("div");
-  hint.className = "call-hint";
-  hint.innerHTML = `Retold from <b>events.jsonl</b>: what the model thought,
-    which tool it called, what came back — and the same for every subtask
-    and verification this task spawned. No model wrote this; it is the log.`;
+  h.textContent = t("taskmodal.story");
   const story = document.createElement("div");
   story.className = "story";
-  story.innerHTML = `<div class="empty">Loading…</div>`;
-  box.append(h, hint, story);
+  story.innerHTML = `<div class="empty">${esc(t("taskmodal.loading"))}</div>`;
+  box.append(h, story);
   $("call-modal").classList.remove("hidden");
 
   try {
-    const data = await (await fetch(`/api/narrative/${Number(id)}`)).json();
+    const data = await (await fetch(`/api/narrative/${Number(id)}?lang=${LANG}`)).json();
     story.innerHTML = renderStory(data.markdown || "");
   } catch (err) {
-    story.innerHTML = `<div class="empty">Could not load the story.</div>`;
+    story.innerHTML = `<div class="empty">${esc(t("taskmodal.load_error"))}</div>`;
   }
 }
 
@@ -687,12 +756,19 @@ function renderStory(md) {
     }
   }
   closeTo(0);
-  return html || `<div class="empty">Nothing to tell yet.</div>`;
+  return html || `<div class="empty">${esc(t("taskmodal.nothing"))}</div>`;
 }
 
 // ---------------------------------------------------------------------------
 // Interactions: run / stop / step / reset
 // ---------------------------------------------------------------------------
+
+// A server error: the JSON carries an English sentence plus a stable code
+// (app.py api_error) — show the code's translation if we have one.
+async function showError(res) {
+  const d = await res.json();
+  alert(I18N["error." + d.code] ? t("error." + d.code) : d.error);
+}
 
 async function submitTask() {
   const task = $("task-input").value.trim();
@@ -702,7 +778,7 @@ async function submitTask() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task }),
   });
-  if (!res.ok) alert((await res.json()).error);
+  if (!res.ok) await showError(res);
   poll(); // update immediately instead of waiting for the next tick
 }
 $("run-btn").onclick = submitTask;
@@ -719,8 +795,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== " " && e.key.toLowerCase() !== "n") return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if ($("step-btn").hidden) return;   // only while actually paused
-  const t = e.target;
-  if (t.matches("input, textarea, select") || t.isContentEditable) return;
+  const el = e.target;
+  if (el.matches("input, textarea, select") || el.isContentEditable) return;
   e.preventDefault();                 // Space must not scroll the page here
   $("step-btn").click();
 });
@@ -738,7 +814,7 @@ async function saveSettings(changes) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
-  if (!res.ok) alert((await res.json()).error);
+  if (!res.ok) await showError(res);
   poll();
 }
 $("verify-check").onchange = (e) => saveSettings({ verify: e.target.checked });
@@ -749,16 +825,14 @@ $("model-select").onchange = (e) => saveSettings({ model: e.target.value });
 
 $("reset-btn").onclick = async () => {
   const res = await fetch("/api/reset", { method: "POST" });
-  if (!res.ok) alert((await res.json()).error);
+  if (!res.ok) await showError(res);
   poll();
 };
 
 $("reset-all-btn").onclick = async () => {
-  if (!confirm("Reset EVERYTHING? Logs, LLM calls, memories, workspace files "
-             + "and the brain files all go back to a fresh install. "
-             + "Only .env is kept.")) return;
+  if (!confirm(t("confirm.reset_all"))) return;
   const res = await fetch("/api/reset_all", { method: "POST" });
-  if (!res.ok) alert((await res.json()).error);
+  if (!res.ok) await showError(res);
   poll();
   pollBrain(); // brain files changed back to their seeds
 };
@@ -775,7 +849,7 @@ let showRaw = false;
 async function openCall(id) {
   currentCall = await (await fetch(`/api/llm_calls/${encodeURIComponent(id)}`)).json();
   showRaw = false;
-  $("call-modal-title").textContent = `LLM call #${id}`;
+  $("call-modal-title").textContent = t("callmodal.title", { id });
   $("call-modal-raw").style.display = "";
   renderCallModal();
   $("call-modal").classList.remove("hidden");
@@ -795,7 +869,7 @@ async function openWorkspaceFile(name) {
 }
 
 function renderCallModal() {
-  $("call-modal-raw").textContent = showRaw ? "show formatted" : "show raw file";
+  $("call-modal-raw").textContent = t(showRaw ? "callmodal.show_pretty" : "callmodal.show_raw");
   const box = $("call-modal-content");
 
   // Fallback (or on request): the plaintext file exactly as on disk.
@@ -807,27 +881,20 @@ function renderCallModal() {
   const req = currentCall.request;
   const usage = (currentCall.response && currentCall.response.usage) || null;
   const usageText = usage
-    ? `&nbsp;·&nbsp; ${usage.prompt_tokens} tokens read, ${usage.completion_tokens} written` : "";
+    ? `&nbsp;·&nbsp; ${esc(t("callmodal.usage",
+        { in: usage.prompt_tokens, out: usage.completion_tokens }))}` : "";
   const endpoint = currentCall.url
-    ? ` &nbsp;·&nbsp; sent to: <b>${esc(currentCall.url)}</b>` : "";
-  let html = `<div class="call-meta">model: <b>${esc(req.model)}</b>${endpoint}
-              &nbsp;·&nbsp; ${req.messages.length} messages sent
-              &nbsp;·&nbsp; response: ${esc(currentCall.status || "?")}${usageText}</div>`;
+    ? ` &nbsp;·&nbsp; ${esc(t("callmodal.sent_to"))} <b>${esc(currentCall.url)}</b>` : "";
+  let html = `<div class="call-meta">${esc(t("callmodal.model"))} <b>${esc(req.model)}</b>${endpoint}
+              &nbsp;·&nbsp; ${esc(t("callmodal.messages", { n: req.messages.length }))}
+              &nbsp;·&nbsp; ${esc(t("callmodal.response"))} ${esc(currentCall.status || "?")}${usageText}</div>`;
 
-  html += `<div class="call-section">REQUEST — what the model saw</div>`;
-  html += `<div class="call-hint">The <b>system</b> message is the assembled
-    system prompt, rebuilt fresh for this call — each labeled block below is
-    one brain file (or the tool list / the memories) pasted in. In the real
-    request they are one long text (see "show raw file"). Everything after
-    it is the conversation so far, including earlier tool results.</div>`;
+  html += `<div class="call-section">${esc(t("callmodal.request"))}</div>`;
   for (const m of req.messages) {
     html += m.role === "system" ? systemCard(m.content) : msgCard(m.role, m.content);
   }
 
-  html += `<div class="call-section">RESPONSE — what the model answered</div>`;
-  html += `<div class="call-hint">The model can only answer with text. The
-    JSON block at the end of this reply is what the orchestrator parses
-    and turns into a real action.</div>`;
+  html += `<div class="call-section">${esc(t("callmodal.response_section"))}</div>`;
   const resp = currentCall.response;
   if (resp && resp.choices) {
     html += msgCard("assistant", resp.choices[0].message.content);
@@ -837,6 +904,8 @@ function renderCallModal() {
   box.innerHTML = html;
 }
 
+// The role names (system / user / assistant) are the literal values from
+// the API request — data, not chrome, so they stay as they are.
 function msgCard(role, content) {
   return `<div class="msg-card role-${esc(role)}">
             <div class="msg-role">${esc(role)}</div>
@@ -847,30 +916,32 @@ function msgCard(role, content) {
 // The system message is build_system_prompt()'s parts joined with "---".
 // Split it back apart and label each part, so you can SEE that the prompt
 // is just the brain files, the tool list and the memories concatenated.
+// [display name (null = the tool list), description key in i18n.js]
 const SYS_PARTS = [
-  ["SYSTEM_PROMPT.md", "the rules of the game"],
-  ["tool list", "generated from the registry in tools.py"],
-  ["GHOST.md", "the persona"],
-  ["KNOWLEDGE.md", "injected facts"],
-  ["memory/*.md", "every saved memory"],
+  ["SYSTEM_PROMPT.md", "callmodal.part.system_prompt"],
+  [null,               "callmodal.part.tools"],
+  ["GHOST.md",         "callmodal.part.ghost"],
+  ["KNOWLEDGE.md",     "callmodal.part.knowledge"],
+  ["memory/*.md",      "callmodal.part.memory"],
 ];
 
 function systemCard(content) {
   const parts = String(content).split("\n\n---\n\n");
   // Label only what we can identify with certainty — a brain file that
   // itself contains a "---" line would shift the labels, so fall back to
-  // the plain one-block card rather than mislabel anything.
+  // the plain one-block card rather than mislabel anything. The two
+  // headings are prompt text (tools.py / agent.py) and stay English.
   const looksRight = (parts.length === 4 || parts.length === 5)
     && parts[1].startsWith("## Available tools")
     && (parts.length === 4 || parts[4].startsWith("## Your memories"));
   if (!looksRight) return msgCard("system", content);
   const segs = parts.map((p, i) => `
     <div class="sys-seg sys-seg-${i}">
-      <div class="sys-seg-label">${esc(SYS_PARTS[i][0])} <span>— ${esc(SYS_PARTS[i][1])}</span></div>
+      <div class="sys-seg-label">${esc(SYS_PARTS[i][0] || t("callmodal.tool_list"))} <span>— ${esc(t(SYS_PARTS[i][1]))}</span></div>
       <pre class="msg-content">${esc(p)}</pre>
     </div>`).join("");
   return `<div class="msg-card role-system">
-            <div class="msg-role">system — one prompt, assembled from ${parts.length} parts</div>
+            <div class="msg-role">${esc(t("callmodal.system_parts", { n: parts.length }))}</div>
             ${segs}
           </div>`;
 }
@@ -888,6 +959,20 @@ $("help-modal").onclick = (e) => {
   if (e.target === $("help-modal")) $("help-modal").classList.add("hidden");
 };
 
+// Language: EN | DE. Switching just navigates to ?lang=… — the page reloads
+// and i18n.js remembers the choice in this browser. The dashboard keeps no
+// state of its own worth saving; everything comes back from the files.
+// (A live switch would have to clear lastHTML, reset the incremental event
+// log and re-render any open dialog — exactly the hidden client state this
+// dashboard claims not to have.)
+document.querySelectorAll(".lang-btn").forEach(btn => {
+  btn.classList.toggle("active", btn.dataset.lang === LANG);
+  btn.onclick = () => {
+    if (brainEditing && !confirm(t("confirm.lang_switch"))) return;   // unsaved brain edit
+    location.search = "?lang=" + btn.dataset.lang;
+  };
+});
+
 // ---------------------------------------------------------------------------
 // Brain files: tabs + in-dashboard editing.
 // Saving POSTs the text; the agent re-reads the files before every LLM
@@ -897,7 +982,7 @@ $("help-modal").onclick = (e) => {
 document.querySelectorAll(".tab").forEach(tab => {
   tab.onclick = () => {
     if (brainEditing) return; // finish or cancel the edit first
-    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
     tab.classList.add("active");
     brainFile = tab.dataset.file;
     $("brain-content").textContent = (window.brainFiles || {})[brainFile] || "…";
@@ -911,7 +996,7 @@ function setBrainEditing(on) {
   $("brain-edit").hidden = on;
   $("brain-save").hidden = !on;
   $("brain-cancel").hidden = !on;
-  document.querySelectorAll(".tab").forEach(t => t.disabled = on);
+  document.querySelectorAll(".tab").forEach(x => x.disabled = on);
 }
 
 $("brain-edit").onclick = () => {
@@ -929,7 +1014,7 @@ $("brain-save").onclick = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: brainFile, content }),
   });
-  if (!res.ok) { alert((await res.json()).error); return; }
+  if (!res.ok) { await showError(res); return; }
   window.brainFiles[brainFile] = content;
   $("brain-content").textContent = content;
   setBrainEditing(false);
@@ -970,4 +1055,12 @@ function saveCollapsed() {
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// t() for the few templates that contain <b> tags (see i18n.js): the
+// parameters come from the files, so they are escaped; the template is not.
+function tHtml(key, params = {}) {
+  const safe = {};
+  for (const [k, v] of Object.entries(params)) safe[k] = esc(v);
+  return t(key, safe);
 }

@@ -49,10 +49,10 @@ Run the tests with `uv run python test_agent.py`; lint and format with
 | `agent.py`      | The agentic loop — start reading here                      |
 | `llm.py`        | One HTTP POST per LLM call, fully logged; models from .env |
 | `tools.py`      | The tool registry — add your own tool here                 |
-| `narrative.py`  | Retells a task's run as a plain-English story from the log |
+| `narrative.py`  | Retells a task's run as a story (English or German) from the log |
 | `storage.py`    | Paths and file plumbing (logs, status, tasks, flags)       |
 | `app.py`        | Flask server: serves the dashboard, reads the files        |
-| `static/`       | The dashboard: one HTML page, CSS, vanilla JS              |
+| `static/`       | The dashboard: one HTML page, CSS, vanilla JS; `i18n.js` = its texts in EN/DE |
 | `test_agent.py` | Runs the real loop against a scripted fake model           |
 
 ## The agent's brain: `agent_data/`
@@ -66,7 +66,7 @@ Run the tests with `uv run python test_agent.py`; lint and format with
 | `logs/events.jsonl`  | Every orchestrator action, one JSON line each                       |
 | `logs/narratives.md` | The story of every top-level task (1, 2, 3, …), retold from the log |
 | `llm_calls/NNN.txt`  | The full request + response of every single LLM call                |
-| `tasks.json`         | The task queue and record (subtasks, verifications)                 |
+| `tasks.json`         | The task queue and record (subtasks, verifications, `error_code`)   |
 | `status.json`        | What the agent is doing right now                                   |
 | `settings.json`      | Loop settings (max rounds, plan first, self-verification, model)    |
 | `workspace/`         | The only folder the `file_edit` tool may touch                      |
@@ -100,6 +100,13 @@ The system prompt, the executor and the dashboard all read that registry.
 - **Stop** — cancels the running task and everything still queued.
 - **Reset logs / Reset everything** — clear the run data / full factory
   reset (only `.env` survives).
+- **EN | DE** (in the header) — the dashboard's language, German by
+  default, remembered per browser; `/?lang=en` or `/?lang=de` in the URL
+  sets it too (handy for a projector). Only the dashboard's own words are
+  translated: prompts, tool descriptions, tool results and the model's
+  text stay English, and so does everything on disk (`events.jsonl`,
+  `logs/narratives.md`, `tasks.json`) — the German is produced at display
+  time from the same files.
 
 The buttons are just flag files (`stop.flag`, `step_mode.flag`,
 `continue.flag`) that the agent checks between rounds.
@@ -112,8 +119,9 @@ called with which arguments, what came back — followed by the same for
 every subtask and verification the task spawned, and the outcome (rounds,
 duration, LLM calls, tokens). It is assembled by `narrative.py` purely
 from `events.jsonl` and `tasks.json`, so it can never claim something
-that did not happen. `logs/narratives.md` holds the story of every
-top-level task and is rewritten each time a task ends.
+that did not happen. The dialog tells it in the dashboard's language
+(`/api/narrative/<id>?lang=de`); `logs/narratives.md` holds the English
+story of every top-level task and is rewritten each time a task ends.
 
 ## Demo task
 

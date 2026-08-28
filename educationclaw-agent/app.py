@@ -22,11 +22,18 @@ from flask import Flask, jsonify, request, send_from_directory
 import llm
 import storage
 from agent import ensure_worker, worker_busy
-from narrative import narrate_task
+from narrative import LANGUAGES, narrate_task
 from tools import TOOLS
 
 app = Flask(__name__, static_folder="static")
+app.json.ensure_ascii = False  # German umlauts stay readable in the browser's Network tab
 PORT = int(os.getenv("PORT", "5000"))  # optional override, set in .env
+
+
+def api_error(code: str, text: str, http_status: int = 400):
+    """Every error the dashboard can show: an English sentence (for curl
+    users and the log) plus a stable code the dashboard translates."""
+    return jsonify({"error": text, "code": code}), http_status
 
 
 @app.route("/")
@@ -77,9 +84,8 @@ def api_state():
             "config": {
                 "model": current.get("model", ""),
                 "endpoint": current.get("base_url", ""),
-                "api_key_masked": (api_key[:3] + "..." + api_key[-4:])
-                if len(api_key) > 8
-                else "(not set)",
+                # Empty = not set; the dashboard says so in its own language.
+                "api_key_masked": (api_key[:3] + "..." + api_key[-4:]) if len(api_key) > 8 else "",
                 "selected": current.get("id"),
                 "models": [
                     {
@@ -118,10 +124,10 @@ def api_llm_call(call_id):
     render the conversation nicely. The raw text is included too."""
     # Valid ids: "003" or "003_error1" (a kept failed attempt).
     if not re.fullmatch(r"\d{3}(_error\d+)?", call_id):
-        return jsonify({"error": "no such call"}), 404
+        return api_error("no_such_call", "no such call", 404)
     path = storage.LLM_CALLS_DIR / f"{call_id}.txt"
     if not path.exists():
-        return jsonify({"error": "no such call"}), 404
+        return api_error("no_such_call", "no such call", 404)
     raw = path.read_text(encoding="utf-8")
 
     # The file format is:  header / --- REQUEST: ... --- / json /
@@ -157,11 +163,15 @@ def api_narrative(task_id):
     """The story of one task — fetched when you click a task row.
 
     Assembled live from events.jsonl and tasks.json (see narrative.py),
-    so it also works for a task that is still running. The same text
-    for every top-level task lives in logs/narratives.md."""
-    story = narrate_task(task_id)
+    so it also works for a task that is still running. ?lang=de tells it
+    in German; logs/narratives.md always holds the English telling of
+    every top-level task."""
+    lang = request.args.get("lang", "en")
+    if lang not in LANGUAGES:  # unknown = English, not an error
+        lang = "en"
+    story = narrate_task(task_id, lang=lang)
     if not story:
-        return jsonify({"error": "no such task"}), 404
+        return api_error("no_such_task", "no such task", 404)
     return jsonify({"task_id": task_id, "markdown": story})
 
 
@@ -171,7 +181,7 @@ def api_workspace_file(relpath):
     file_edit tool: the resolved path must stay inside workspace/."""
     full = (storage.WORKSPACE_DIR / relpath).resolve()
     if not full.is_relative_to(storage.WORKSPACE_DIR.resolve()) or not full.is_file():
-        return jsonify({"error": "no such file"}), 404
+        return api_error("no_such_file", "no such file", 404)
     return (
         full.read_text(encoding="utf-8", errors="replace"),
         200,
@@ -198,7 +208,7 @@ def api_task():
     panel). One task runs at a time, always in order."""
     text = str((request.get_json(silent=True) or {}).get("task") or "").strip()
     if not text:
-        return jsonify({"error": "Task text is empty."}), 400
+        return api_error("empty_task", "Task text is empty.")
 
     task = storage.add_task(text, kind="user")
     storage.log_event("task_queued", task_id=task["id"], kind="user", task=text[:200])
@@ -234,11 +244,11 @@ def api_settings():
     changes = {k: v for k, v in data.items() if k in ("max_iterations", "verify", "plan", "model")}
     # The model must be one of the entries configured in .env.
     if "model" in changes and llm.model_by_id(changes["model"]) is None:
-        return jsonify({"error": "unknown model — see the LLM_<n>_ keys in .env"}), 400
+        return api_error("unknown_model", "unknown model — see the LLM_<n>_ keys in .env")
     try:
         return jsonify({"ok": True, "settings": storage.write_settings(changes)})
     except (TypeError, ValueError):
-        return jsonify({"error": "invalid settings"}), 400
+        return api_error("invalid_settings", "invalid settings")
 
 
 @app.route("/api/continue", methods=["POST"])
@@ -261,7 +271,7 @@ def api_brain_save():
     }
     path = allowed.get(data.get("name"))
     if path is None:
-        return jsonify({"error": "unknown file"}), 400
+        return api_error("unknown_file", "unknown file")
     storage.atomic_write_text(path, str(data.get("content", "")))
     return jsonify({"ok": True})
 
@@ -270,7 +280,7 @@ def api_brain_save():
 def api_reset():
     """Clear logs, LLM calls and status. Memories and .md files survive."""
     if worker_busy():
-        return jsonify({"error": "Cannot reset while a task is running."}), 400
+        return api_error("busy", "Cannot reset while a task is running.")
     storage.reset_run_data()
     return jsonify({"ok": True})
 
@@ -280,7 +290,7 @@ def api_reset_all():
     """Factory reset: logs, memories, workspace, screen, brain files —
     everything back to a fresh install. Only .env survives."""
     if worker_busy():
-        return jsonify({"error": "Cannot reset while a task is running."}), 400
+        return api_error("busy", "Cannot reset while a task is running.")
     storage.factory_reset()
     return jsonify({"ok": True})
 
