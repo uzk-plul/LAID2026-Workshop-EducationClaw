@@ -87,7 +87,8 @@ The system prompt, the executor and the dashboard all read that registry.
 
 ## Dashboard controls
 
-- **Step-by-step** — pause before every loop round until you press *Next step*.
+- **Step-by-step** — pause before every loop round until you press
+  *Next step* (or Space / N on the keyboard).
 - **Plan first** — user tasks become pure planners: only `add_task` is
   allowed, the real work happens in the subtasks.
 - **Self-verification** — every finished user task queues a fresh

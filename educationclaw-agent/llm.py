@@ -151,7 +151,9 @@ def call_llm(messages: list) -> str:
         )
     call_id = next_number(LLM_CALLS_DIR)
     url = f"{model['base_url']}/chat/completions"
-    task_id = read_status().get("task_id")  # which task this call serves
+    status = read_status()  # which task (and which loop round) this call serves
+    task_id = status.get("task_id")
+    iteration = status.get("iteration")
 
     # This dict IS the API. Nothing more is sent.
     payload = {"model": model["model"], "messages": messages}
@@ -160,7 +162,13 @@ def call_llm(messages: list) -> str:
     if model["max_tokens"] is not None:
         payload["max_tokens"] = model["max_tokens"]
 
-    log_event("llm_call_start", call_id=call_id, task_id=task_id, model=model["model"])
+    log_event(
+        "llm_call_start",
+        call_id=call_id,
+        task_id=task_id,
+        iteration=iteration,
+        model=model["model"],
+    )
 
     # Try twice: local endpoints and workshop wifi hiccup sometimes.
     last_error = None

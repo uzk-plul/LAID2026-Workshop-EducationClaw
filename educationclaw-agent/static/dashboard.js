@@ -474,19 +474,26 @@ function renderCalls(calls, events) {
       hidden.</div>`);
     return;
   }
-  // Token counts and task attribution per call come from the event log.
-  const tokens = {}, callTask = {};
+  // Token counts, task attribution and loop round per call all come from
+  // the event log. tokens_in doubles as the CONTEXT BAR below each call:
+  // the whole conversation is resent every round, so the bars form a
+  // growing staircase — that staircase is the lesson about context.
+  const tokens = {}, tokensIn = {}, callTask = {}, callRound = {};
   for (const e of events) {
     if (e.type === "llm_call_done" && e.tokens_in != null) {
-      tokens[String(e.call_id).padStart(3, "0")] =
-        `${fmtTokens(e.tokens_in)}→${fmtTokens(e.tokens_out)} tok`;
+      const id = String(e.call_id).padStart(3, "0");
+      tokens[id] = `${fmtTokens(e.tokens_in)}→${fmtTokens(e.tokens_out)} tok`;
+      tokensIn[id] = e.tokens_in;
     }
-    if (e.type === "llm_call_start" && e.task_id != null) {
-      callTask[String(e.call_id).padStart(3, "0")] = e.task_id;
+    if (e.type === "llm_call_start") {
+      const id = String(e.call_id).padStart(3, "0");
+      if (e.task_id != null) callTask[id] = e.task_id;
+      if (e.iteration != null) callRound[id] = e.iteration;
     }
   }
+  const maxIn = Math.max(1, ...Object.values(tokensIn));
   // Build with DOM APIs (not onclick strings) so no name can inject code.
-  const key = JSON.stringify(calls) + JSON.stringify(tokens) + JSON.stringify(callTask);
+  const key = JSON.stringify([calls, tokens, callTask, callRound]);
   if (lastHTML["calls-list"] === key) return;
   lastHTML["calls-list"] = key;
   box.innerHTML = "";
@@ -494,19 +501,34 @@ function renderCalls(calls, events) {
   for (const t of (lastState?.tasks || [])) labelById[t.id] = tlabel(t);
   for (const c of calls) {
     const failed = c.id.includes("_error");
-    const t = callTask[c.id.slice(0, 3)];
+    const base = c.id.slice(0, 3);
+    const t = callTask[base];
     const forTask = t != null ? ` · task ${labelById[t] ?? t}` : "";
+    const forRound = callRound[base] != null ? ` · round ${callRound[base]}` : "";
     const div = document.createElement("div");
     div.className = "call-item" + (failed ? " failed" : "");
+    const row = document.createElement("div");
+    row.className = "call-row";
     const label = document.createElement("span");
     label.textContent = failed
-      ? `▸ call #${c.id.slice(0, 3)} (failed attempt)${forTask}`
-      : `▸ call #${c.id}${forTask}`;
+      ? `▸ call #${base} (failed attempt)${forTask}${forRound}`
+      : `▸ call #${c.id}${forTask}${forRound}`;
     const meta = document.createElement("span");
     meta.className = "sz";
     meta.textContent = [tokens[c.id], (c.size / 1024).toFixed(1) + " kB"]
       .filter(Boolean).join(" · ");
-    div.append(label, meta);
+    row.append(label, meta);
+    div.append(row);
+    if (tokensIn[c.id] != null) {
+      const bar = document.createElement("div");
+      bar.className = "call-bar";
+      bar.title = `${tokensIn[c.id].toLocaleString()} tokens of context went into this call `
+                + `(the longest call in this list = full width)`;
+      const fill = document.createElement("span");
+      fill.style.width = Math.max(1, (tokensIn[c.id] / maxIn) * 100) + "%";
+      bar.appendChild(fill);
+      div.append(bar);
+    }
     div.addEventListener("click", () => openCall(c.id));
     box.appendChild(div);
   }
@@ -691,6 +713,18 @@ $("task-input").addEventListener("keydown", (e) => {
 $("stop-btn").onclick = () => fetch("/api/stop", { method: "POST" }).then(poll);
 $("step-btn").onclick = () => fetch("/api/continue", { method: "POST" }).then(poll);
 
+// A shortcut for the stage: while step mode has the agent paused, Space
+// (or N) presses "Next step" — so you can narrate without mousing around.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== " " && e.key.toLowerCase() !== "n") return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if ($("step-btn").hidden) return;   // only while actually paused
+  const t = e.target;
+  if (t.matches("input, textarea, select") || t.isContentEditable) return;
+  e.preventDefault();                 // Space must not scroll the page here
+  $("step-btn").click();
+});
+
 $("step-mode-check").onchange = (e) =>
   fetch("/api/step_mode", {
     method: "POST",
@@ -782,11 +816,12 @@ function renderCallModal() {
 
   html += `<div class="call-section">REQUEST — what the model saw</div>`;
   html += `<div class="call-hint">The <b>system</b> message is the assembled
-    system prompt — SYSTEM_PROMPT.md + tool list + GHOST.md + KNOWLEDGE.md +
-    all memories — rebuilt fresh for this call. Everything after it is the
-    conversation so far, including earlier tool results.</div>`;
+    system prompt, rebuilt fresh for this call — each labeled block below is
+    one brain file (or the tool list / the memories) pasted in. In the real
+    request they are one long text (see "show raw file"). Everything after
+    it is the conversation so far, including earlier tool results.</div>`;
   for (const m of req.messages) {
-    html += msgCard(m.role, m.content);
+    html += m.role === "system" ? systemCard(m.content) : msgCard(m.role, m.content);
   }
 
   html += `<div class="call-section">RESPONSE — what the model answered</div>`;
@@ -806,6 +841,37 @@ function msgCard(role, content) {
   return `<div class="msg-card role-${esc(role)}">
             <div class="msg-role">${esc(role)}</div>
             <pre class="msg-content">${esc(content)}</pre>
+          </div>`;
+}
+
+// The system message is build_system_prompt()'s parts joined with "---".
+// Split it back apart and label each part, so you can SEE that the prompt
+// is just the brain files, the tool list and the memories concatenated.
+const SYS_PARTS = [
+  ["SYSTEM_PROMPT.md", "the rules of the game"],
+  ["tool list", "generated from the registry in tools.py"],
+  ["GHOST.md", "the persona"],
+  ["KNOWLEDGE.md", "injected facts"],
+  ["memory/*.md", "every saved memory"],
+];
+
+function systemCard(content) {
+  const parts = String(content).split("\n\n---\n\n");
+  // Label only what we can identify with certainty — a brain file that
+  // itself contains a "---" line would shift the labels, so fall back to
+  // the plain one-block card rather than mislabel anything.
+  const looksRight = (parts.length === 4 || parts.length === 5)
+    && parts[1].startsWith("## Available tools")
+    && (parts.length === 4 || parts[4].startsWith("## Your memories"));
+  if (!looksRight) return msgCard("system", content);
+  const segs = parts.map((p, i) => `
+    <div class="sys-seg sys-seg-${i}">
+      <div class="sys-seg-label">${esc(SYS_PARTS[i][0])} <span>— ${esc(SYS_PARTS[i][1])}</span></div>
+      <pre class="msg-content">${esc(p)}</pre>
+    </div>`).join("");
+  return `<div class="msg-card role-system">
+            <div class="msg-role">system — one prompt, assembled from ${parts.length} parts</div>
+            ${segs}
           </div>`;
 }
 

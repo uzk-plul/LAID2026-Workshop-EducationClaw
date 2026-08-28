@@ -40,11 +40,12 @@
     <h2>Task</h2>
     <div class="task-layout">
       <textarea id="task-input" rows="3"
-        placeholder="Give the agent a task, e.g.: Check the current time, then set the screen to a happy greeting that mentions the time."></textarea>
+        placeholder="Give the agent a task, e.g.: Check the current time, then set the screen to a happy greeting that mentions the time. (Ctrl+Enter runs it)"></textarea>
       <div class="task-controls">
         <div class="row">
           <button id="run-btn">▶ Run task</button>
-          <button id="step-btn" hidden>⏭ Next step</button>
+          <button id="step-btn" hidden
+                  title="Run one more loop round (shortcut: Space or N)">⏭ Next step</button>
           <button id="stop-btn" class="danger" hidden>⏹ Stop</button>
           <button id="reset-btn" class="secondary">Reset logs</button>
           <button id="reset-all-btn" class="danger"
@@ -52,7 +53,7 @@
             Reset everything</button>
         </div>
         <div class="settings-row">
-          <label class="step-toggle" title="Pause before every loop round until you press 'Next step' — great for narrating what happens">
+          <label class="step-toggle" title="Pause before every loop round until you press 'Next step' (or Space / N) — great for narrating what happens">
             <input type="checkbox" id="step-mode-check"> Step-by-step
           </label>
           <label class="step-toggle" title="Every user task first runs as a PLANNER that may only create subtasks (all other tools are refused) — the real work then happens in those subtasks">
@@ -130,7 +131,7 @@
       </section>
 
       <section class="panel" id="panel-calls">
-        <h2>LLM calls <span class="hint">every single request to the model — click one to see exactly what it saw and answered</span></h2>
+        <h2>LLM calls <span class="hint">every single request to the model — the bar is how much context it read (watch the staircase grow each round); click one to see exactly what it saw and answered</span></h2>
         <div id="calls-list"></div>
       </section>
     </div>

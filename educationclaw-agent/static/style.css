@@ -382,13 +382,26 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 /* ---------- llm calls + workspace lists ---------- */
 #calls-list, #workspace-list { max-height: 300px; overflow-y: auto; }
 .call-item, .ws-item {
-  display: flex; justify-content: space-between; gap: 10px;
   font-family: var(--mono); font-size: 12px;
   padding: 9px 12px; border-radius: 8px; cursor: pointer;
 }
+.call-row, .ws-item { display: flex; justify-content: space-between; gap: 10px; }
 .call-item:hover, .ws-item:hover { background: rgba(47, 107, 255, 0.14); }
 .call-item .sz, .ws-item .sz { color: var(--muted); white-space: nowrap; }
-.call-item.failed span:first-child { color: var(--peach); }
+.call-item.failed .call-row span:first-child { color: var(--peach); }
+/* The context bar under each call: the tokens the model READ, relative to
+   the longest call in the list. The conversation is resent in full every
+   round, so the bars form a growing staircase — that is context growth. */
+.call-bar {
+  height: 4px; margin-top: 6px; border-radius: 2px;
+  background: rgba(35, 47, 94, 0.6);
+  overflow: hidden;
+}
+.call-bar span {
+  display: block; height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--violet), var(--cyan));
+  box-shadow: 0 0 6px rgba(24, 217, 255, 0.4);
+}
 .ws-item span:first-child { color: var(--blue-soft); }
 
 /* ---------- tasks (queue + record) ---------- */
@@ -503,6 +516,17 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 }
 .msg-card.role-system    { border-left-color: var(--violet); }
 .msg-card.role-system    .msg-role { color: var(--lavender); }
+/* The system message, split back into the parts build_system_prompt()
+   joined together — one colored block per brain file / tool list / memories. */
+.sys-seg { margin: 10px 0; border-left: 3px solid var(--line); padding-left: 12px; }
+.sys-seg .msg-content { max-height: 220px; }
+.sys-seg-label { font-family: var(--mono); font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.sys-seg-label span { color: var(--muted); font-weight: normal; }
+.sys-seg-0 { border-left-color: var(--violet); } .sys-seg-0 .sys-seg-label { color: var(--lavender); }
+.sys-seg-1 { border-left-color: var(--peach); }  .sys-seg-1 .sys-seg-label { color: var(--peach); }
+.sys-seg-2 { border-left-color: var(--pink); }   .sys-seg-2 .sys-seg-label { color: var(--pink); }
+.sys-seg-3 { border-left-color: var(--cyan); }   .sys-seg-3 .sys-seg-label { color: var(--cyan); }
+.sys-seg-4 { border-left-color: var(--blue); }   .sys-seg-4 .sys-seg-label { color: var(--blue-soft); }
 .msg-card.role-user      { border-left-color: var(--cyan); }
 .msg-card.role-user      .msg-role { color: var(--cyan); }
 .msg-card.role-assistant { border-left-color: var(--blue); }
